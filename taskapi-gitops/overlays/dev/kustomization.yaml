@@ -5,20 +5,20 @@ namespace: taskapi-dev
 
 # Inherit all resources from base/
 resources:
-  - ../../base
+- ../../base
 
 # Apply dev-specific patches (only the fields that differ)
 patches:
-  - path: patches/deployment-patch.yaml
-    target:
-      kind: Deployment
-      name: taskapi
+- path: patches/deployment-patch.yaml
+  target:
+    kind: Deployment
+    name: taskapi
 
 # Image override — CI pipeline updates this tag after each successful build
 images:
-  - name: taskapi
-    newName: ghcr.io/ajay263/taskapi
-    newTag: latest   # Phase 10 changes this to the actual commit SHA
+- name: taskapi
+  newName: ghcr.io/ajay263/taskapi
+  newTag: sha-2bba0a2
 
 commonLabels:
   environment: dev
