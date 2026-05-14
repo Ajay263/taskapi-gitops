@@ -11,7 +11,7 @@ metadata:
 spec:
   project: default
   source:
-    repoURL: https://github.com/YOUR_USERNAME/taskapi-gitops
+    repoURL: https://github.com/Ajay263/taskapi-gitops
     targetRevision: HEAD
     path: argocd/apps
   destination:
