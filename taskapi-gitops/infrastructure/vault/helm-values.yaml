@@ -1,0 +1,44 @@
+# Vault Helm chart configuration
+#
+# IMPORTANT: We use dev mode for this training.
+# Dev mode means:
+#   - Data stored in memory (lost when pod restarts — acceptable for training)
+#   - Root token is always "root" (never do this in production)
+#   - TLS disabled (acceptable for local training)
+#
+# PRODUCTION differences:
+#   - server.ha.enabled: true  (3 replicas for HA)
+#   - server.ha.raft.enabled: true  (consensus via Raft protocol)
+#   - Sealed with cloud KMS (AWS KMS, GCP Cloud KMS)
+#   - TLS enabled with a real certificate
+#   - Audit logs written to persistent storage
+
+server:
+  dev:
+    enabled: true
+    devRootToken: "root"
+
+  resources:
+    requests:
+      memory: "256Mi"
+      cpu: "100m"
+    limits:
+      memory: "512Mi"
+      cpu: "250m"
+
+  # Run Vault on the infra node
+  nodeSelector:
+    workload: infra
+
+  # Expose Vault on NodePort 30200 → accessible at http://localhost:8200
+  service:
+    type: NodePort
+    nodePort: 30200
+
+ui:
+  enabled: true
+  serviceType: NodePort
+  nodePort: 30200
+
+injector:
+  enabled: false   # We use External Secrets Operator instead

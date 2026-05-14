@@ -1,0 +1,143 @@
+# ── What is a Deployment? ────────────────────────────────────────────────────
+# A Deployment tells Kubernetes: "I want N copies of this pod running at all times."
+# The Deployment controller watches the cluster continuously.
+# If a pod crashes → it starts a new one.
+# If a node fails → it reschedules pods onto healthy nodes.
+# If you change the image → it does a rolling update (zero downtime).
+#
+# You never create pods directly in production.
+# You always create a Deployment and let it manage the pods.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: taskapi
+  namespace: taskapi-dev
+  labels:
+    app: taskapi
+spec:
+  replicas: 1   # 1 pod in dev (save cluster resources). Prod will use 3.
+  selector:
+    matchLabels:
+      app: taskapi   # The Deployment manages pods with this label
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      # maxUnavailable: 0 → never go below the desired count during an update
+      # This guarantees zero-downtime: the old pod is not removed until the new one is ready
+      maxUnavailable: 0
+      # maxSurge: 1 → allow one EXTRA pod during the update
+      # Update sequence: start new pod → wait for readiness probe → remove old pod
+      maxSurge: 1
+  template:
+    metadata:
+      labels:
+        app: taskapi   # Must match spec.selector.matchLabels
+        version: v1    # Used by Istio for traffic routing in Phase 12
+      annotations:
+        # These annotations tell Prometheus how to scrape this pod
+        # (Before we add ServiceMonitor in Phase 13, these are used by annotation-based scraping)
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8000"
+        prometheus.io/path: "/metrics"
+    spec:
+      serviceAccountName: taskapi
+
+      # ── Pod-level security context ──────────────────────────────────────────
+      # Applied to ALL containers in this pod
+      securityContext:
+        runAsNonRoot: true   # Kubernetes enforces this — blocks root containers
+        runAsUser: 1001       # Must match the UID in our Dockerfile (UID of appuser)
+        runAsGroup: 1001
+        fsGroup: 1001         # Files mounted into the pod are owned by this group
+        seccompProfile:
+          type: RuntimeDefault  # Apply the default seccomp syscall filter
+
+      # ── Topology spread constraint ──────────────────────────────────────────
+      # Without this, Kubernetes might run all replicas on one node.
+      # If that node fails, ALL replicas fail simultaneously.
+      # This constraint spreads replicas across nodes for HA.
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: DoNotSchedule
+          labelSelector:
+            matchLabels:
+              app: taskapi
+
+      containers:
+        - name: taskapi
+          # imagePullPolicy: Never → use the image we loaded with 'kind load docker-image'
+          # Do not try to pull from Docker Hub (the image is not there yet)
+          # Phase 10 changes this to IfNotPresent once we push to GHCR
+          image: ghcr.io/ajay263/taskapi:latest
+          imagePullPolicy: IfNotPresent
+
+          ports:
+            - name: http    # Named ports are required by Istio for protocol detection
+              containerPort: 8000
+              protocol: TCP
+
+          env:
+            - name: ENVIRONMENT
+              value: "dev"   # Kustomize overlays (Phase 9) change this per environment
+
+            - name: APP_VERSION
+              value: "0.1.0"  # CI pipeline (Phase 10) updates this per build
+
+            - name: LOG_LEVEL
+              value: "INFO"   # Phase 9: DEBUG in dev, WARNING in prod
+
+            # DB_PASSWORD: Phase 7 replaces this with a Vault-sourced secret.
+            # For Phase 6 only, we set a placeholder so the pod starts without Vault.
+            - name: DB_PASSWORD
+              value: "placeholder-vault-not-configured-yet"
+
+          # ── Resource limits ─────────────────────────────────────────────────
+          # ALWAYS set these in production. Without them:
+          # - A memory leak can consume all cluster memory and evict other pods
+          # - A runaway loop can consume all cluster CPU and starve other pods
+          #
+          # requests: minimum resources Kubernetes must reserve for this pod on a node
+          # limits:   hard cap — pod is killed (OOMKill) or throttled if exceeded
+          resources:
+            requests:
+              memory: "64Mi"
+              cpu: "50m"    # 50 millicores = 5% of one CPU core
+            limits:
+              memory: "128Mi"
+              cpu: "200m"
+
+          # ── Health probes ───────────────────────────────────────────────────
+          # These are separate from the Docker HEALTHCHECK we defined in Phase 5.
+          #
+          # readinessProbe → Is this pod ready to receive traffic?
+          #   FAIL: Kubernetes removes the pod from the Service's endpoint list.
+          #   The pod is NOT restarted. Requests stop coming to it.
+          #   Use case: pod is starting up, or dependency is temporarily unavailable.
+          #
+          # livenessProbe → Is this pod alive and not deadlocked?
+          #   FAIL: Kubernetes RESTARTS the pod.
+          #   Use case: pod has entered an unrecoverable error state.
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 5    # Wait 5s before first check (app startup time)
+            periodSeconds: 10
+            failureThreshold: 3
+
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 15   # More time before liveness kicks in
+            periodSeconds: 20
+            failureThreshold: 3
+
+          # ── Container-level security context ────────────────────────────────
+          securityContext:
+            allowPrivilegeEscalation: false   # Cannot gain more privileges than its parent
+            readOnlyRootFilesystem: true       # Cannot write to the filesystem
+            capabilities:
+              drop:
+                - ALL   # Drop all Linux capabilities (most apps need none)

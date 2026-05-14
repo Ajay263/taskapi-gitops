@@ -1,0 +1,21 @@
+# ── What is kustomization.yaml? ────────────────────────────────────────────
+# This is the manifest for Kustomize — a tool for managing Kubernetes YAML.
+# It lists all resources in this "base" directory.
+# Running 'kustomize build base/' combines all listed resources into one YAML.
+# ArgoCD uses this to know what to deploy.
+# Phase 9 adds "overlays" — environment-specific patches on top of this base.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - namespace.yaml
+  - serviceaccount.yaml
+  - deployment.yaml
+  - service.yaml
+  - ingress.yaml
+
+# These labels are added to EVERY resource created from this base.
+# Makes it easy to select all taskapi resources: kubectl get all -l app.kubernetes.io/name=taskapi
+commonLabels:
+  app.kubernetes.io/name: taskapi
+  app.kubernetes.io/managed-by: kustomize

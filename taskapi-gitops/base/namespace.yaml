@@ -1,0 +1,20 @@
+# ── What is a Namespace? ─────────────────────────────────────────────────────
+# A namespace is a virtual partition inside a Kubernetes cluster.
+# All resources (pods, services, secrets, config maps) exist within a namespace.
+#
+# Why use namespaces?
+#   Isolation:       A misconfigured resource in 'taskapi-dev' cannot affect 'taskapi-prod'
+#   RBAC:            Grant permission per namespace — dev team gets access to dev only
+#   Network policy:  Restrict traffic between namespaces (no dev pod can call prod)
+#   Resource quotas: Limit total CPU/memory the entire dev environment can use
+#
+# We create one namespace per environment.
+# Right now we start with taskapi-dev.
+# Phase 9 (Kustomize) adds staging and prod namespaces.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: taskapi-dev
+  labels:
+    istio-injection: enabled    # Phase 12: tells Istio to inject sidecars into pods here
+    environment: dev

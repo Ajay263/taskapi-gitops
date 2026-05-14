@@ -1,0 +1,47 @@
+# ── What is an Ingress? ─────────────────────────────────────────────────────
+# An Ingress routes external HTTP(S) traffic into the cluster.
+# The NGINX Ingress Controller we installed in Phase 3 implements the Ingress spec.
+#
+# Traffic path WITHOUT Ingress:
+#   Browser → ??? → ClusterIP Service (not reachable from outside)
+#
+# Traffic path WITH Ingress:
+#   Browser (port 8080)
+#     → KinD port mapping (host:8080 → container:30080)
+#       → NGINX Ingress Controller pod
+#         → ClusterIP Service (taskapi)
+#           → Pod (port 8000)
+#
+# The path /api(/|$)(.*) with rewrite-target /$2 means:
+#   Request: GET /api/health        → forwarded as: GET /health
+#   Request: GET /api/tasks         → forwarded as: GET /tasks
+#   Request: POST /api/tasks        → forwarded as: POST /tasks
+#
+# Why a path prefix (/api)?
+# In a real system, the same Ingress routes many services.
+# /api/* → taskapi, /auth/* → authservice, /uploads/* → fileservice
+# For local dev, the prefix also makes it clear the request is going through Kubernetes.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: taskapi
+  namespace: taskapi-dev
+  annotations:
+    kubernetes.io/ingress.class: "nginx"
+    # Capture the part after /api and use it as the forwarded path
+    nginx.ingress.kubernetes.io/rewrite-target: /$2
+spec:
+  rules:
+    - http:
+        paths:
+          # This regex captures everything after /api
+          # /api/tasks    → /tasks
+          # /api/health   → /health
+          # /api/docs     → /docs
+          - path: /api(/|$)(.*)
+            pathType: ImplementationSpecific
+            backend:
+              service:
+                name: taskapi
+                port:
+                  name: http

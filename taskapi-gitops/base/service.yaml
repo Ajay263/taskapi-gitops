@@ -1,0 +1,29 @@
+# ── What is a Service? ───────────────────────────────────────────────────────
+# Pods are ephemeral — they get new IP addresses every time they restart.
+# A Service provides a stable IP address and DNS name that routes traffic
+# to the current set of healthy, ready pods.
+#
+# Other services (and the Ingress Controller) never talk to pods directly.
+# They talk to the Service, which forwards traffic to available pods.
+# This is also how Kubernetes load-balances across multiple replicas.
+#
+# Service types:
+#   ClusterIP:    Accessible only inside the cluster (what we use)
+#   NodePort:     Also exposed on a static port on each node
+#   LoadBalancer: Creates a cloud load balancer (AWS ELB, GCP LB)
+apiVersion: v1
+kind: Service
+metadata:
+  name: taskapi
+  namespace: taskapi-dev
+  labels:
+    app: taskapi
+spec:
+  selector:
+    app: taskapi    # Routes to pods with this label
+  ports:
+    - name: http    # Named ports required by Istio
+      port: 80       # Port the Service listens on inside the cluster
+      targetPort: 8000  # Port on the pod (our FastAPI app)
+      protocol: TCP
+  type: ClusterIP
