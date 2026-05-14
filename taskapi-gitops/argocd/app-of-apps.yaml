@@ -1,0 +1,25 @@
+# The "App of Apps" pattern.
+# This root Application watches the argocd/apps/ folder.
+# Any Application YAML you add there is automatically deployed.
+# Adding a new environment = add a new file to argocd/apps/.
+# The root app picks it up automatically on next sync.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: app-of-apps
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/YOUR_USERNAME/taskapi-gitops
+    targetRevision: HEAD
+    path: argocd/apps
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: argocd
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true

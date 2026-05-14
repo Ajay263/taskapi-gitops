@@ -1,0 +1,43 @@
+# An ArgoCD Application = a connection between:
+#   SOURCE: a path in a Git repo
+#   DESTINATION: a namespace in a cluster
+#
+# ArgoCD continuously compares the SOURCE with the live cluster state.
+# If they differ, it syncs (automatically or on demand).
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: taskapi-dev
+  namespace: argocd
+  finalizers:
+    # Ensures ArgoCD deletes all managed resources when this Application is deleted
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: taskapi
+
+  source:
+    repoURL: https://github.com/Ajay263/taskapi-gitops
+    targetRevision: HEAD    # Always track the latest commit on the default branch
+    path: base              # Phase 9 changes this to: overlays/dev
+
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: taskapi-dev
+
+  syncPolicy:
+    automated:
+      prune: true        # Delete resources that are removed from Git
+      selfHeal: true     # Revert any manual changes made directly to the cluster
+      allowEmpty: false  # Refuse to sync if the result would delete all resources
+
+    syncOptions:
+      - CreateNamespace=true      # Create the namespace if it doesn't exist
+      - ApplyOutOfSyncOnly=true   # Only apply resources that have changed (faster)
+      - ServerSideApply=true      # Better conflict handling
+
+    retry:
+      limit: 5
+      backoff:
+        duration: 5s
+        factor: 2
+        maxDuration: 3m
