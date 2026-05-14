@@ -1,0 +1,28 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: taskapi-prod
+
+resources:
+  - ../../base
+  - poddisruptionbudget.yaml   # Extra resource only in production
+
+patches:
+  - path: patches/deployment-patch.yaml
+    target:
+      kind: Deployment
+      name: taskapi
+  - path: patches/external-secret-patch.yaml
+    target:
+      kind: ExternalSecret
+      name: taskapi-secrets
+
+images:
+  - name: taskapi
+    newName: ghcr.io/ajay263/taskapi
+    newTag: "1.0.0"   # Production ALWAYS uses pinned semver, NEVER 'latest'
+    # Why not 'latest'? Two deploys with 'latest' can run different code
+    # if the image was pushed between them. Pinning guarantees determinism.
+
+commonLabels:
+  environment: prod

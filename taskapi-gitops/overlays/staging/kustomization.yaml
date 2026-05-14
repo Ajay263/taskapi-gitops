@@ -1,0 +1,25 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: taskapi-staging
+
+resources:
+  - ../../base
+
+patches:
+  - path: patches/deployment-patch.yaml
+    target:
+      kind: Deployment
+      name: taskapi
+  - path: patches/external-secret-patch.yaml
+    target:
+      kind: ExternalSecret
+      name: taskapi-secrets
+
+images:
+  - name: taskapi
+    newName: ghcr.io/ajay263/taskapi
+    newTag: latest
+
+commonLabels:
+  environment: staging

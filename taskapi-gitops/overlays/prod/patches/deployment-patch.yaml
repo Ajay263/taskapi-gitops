@@ -1,0 +1,22 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: taskapi
+spec:
+  replicas: 3
+  template:
+    spec:
+      containers:
+        - name: taskapi
+          env:
+            - name: ENVIRONMENT
+              value: prod
+            - name: LOG_LEVEL
+              value: WARNING   # Only warnings and errors — reduces log volume and storage cost
+          resources:
+            requests:
+              memory: "128Mi"
+              cpu: "100m"
+            limits:
+              memory: "256Mi"
+              cpu: "500m"

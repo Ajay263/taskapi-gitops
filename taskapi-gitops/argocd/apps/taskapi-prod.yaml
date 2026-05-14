@@ -1,0 +1,25 @@
+piVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: taskapi-prod
+  namespace: argocd
+spec:
+  project: taskapi
+  source:
+    repoURL: https://github.com/ajay263/taskapi-gitops
+    targetRevision: HEAD
+    path: overlays/prod
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: taskapi-prod
+  syncPolicy:
+    # Production is NOT automated — a human must click Sync in ArgoCD UI
+    # This prevents accidental deployments to production
+    automated: null
+    syncOptions:
+      - CreateNamespace=true
+  ignoreDifferences:
+    # HPA adjusts replicas dynamically — ArgoCD should not fight it
+    - group: apps
+      kind: Deployment
+      jsonPointers: [/spec/replicas]

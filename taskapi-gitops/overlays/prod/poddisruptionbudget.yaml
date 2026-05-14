@@ -1,0 +1,18 @@
+# PodDisruptionBudget — production only
+#
+# When Kubernetes drains a node (for maintenance or upgrades),
+# it evicts pods. Without a PDB, ALL pods could be evicted simultaneously.
+# A PDB says: "During any disruption, keep at least 2 pods running."
+#
+# Without a PDB: node drain → 3 pods evicted → complete outage during maintenance.
+# With PDB (minAvailable: 2): node drain evicts 1 pod at a time, 2 always available.
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: taskapi-pdb
+  namespace: taskapi-prod
+spec:
+  minAvailable: 2
+  selector:
+    matchLabels:
+      app: taskapi
