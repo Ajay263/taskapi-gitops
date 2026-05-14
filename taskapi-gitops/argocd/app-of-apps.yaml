@@ -13,7 +13,7 @@ spec:
   source:
     repoURL: https://github.com/ajay263/taskapi-gitops
     targetRevision: HEAD
-    path: argocd/apps
+    path: taskapi-gitops/argocd/apps
   destination:
     server: https://kubernetes.default.svc
     namespace: argocd

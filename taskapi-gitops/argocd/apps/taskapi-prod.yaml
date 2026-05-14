@@ -8,7 +8,7 @@ spec:
   source:
     repoURL: https://github.com/ajay263/taskapi-gitops
     targetRevision: HEAD
-    path: overlays/prod
+    path: taskapi-gitops/overlays/prod
   destination:
     server: https://kubernetes.default.svc
     namespace: taskapi-prod

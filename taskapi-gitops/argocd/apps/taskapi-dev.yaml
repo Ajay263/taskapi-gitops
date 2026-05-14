@@ -18,7 +18,7 @@ spec:
   source:
     repoURL: https://github.com/ajay263/taskapi-gitops
     targetRevision: HEAD    # Always track the latest commit on the default branch
-    path: overlays/dev             # Phase 9 changes this to: overlays/dev
+    path: taskapi-gitops/overlays/dev             # Phase 9 changes this to: overlays/dev
 
   destination:
     server: https://kubernetes.default.svc
