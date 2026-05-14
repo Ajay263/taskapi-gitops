@@ -90,7 +90,15 @@ spec:
             # DB_PASSWORD: Phase 7 replaces this with a Vault-sourced secret.
             # For Phase 6 only, we set a placeholder so the pod starts without Vault.
             - name: DB_PASSWORD
-              value: "placeholder-vault-not-configured-yet"
+              valueFrom:
+                secretKeyRef:
+                  name: taskapi-secrets
+                  key: db-password
+            - name: API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: taskapi-secrets
+                  key: api-key
 
           # ── Resource limits ─────────────────────────────────────────────────
           # ALWAYS set these in production. Without them:

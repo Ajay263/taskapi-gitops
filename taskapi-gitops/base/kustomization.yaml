@@ -10,6 +10,8 @@ kind: Kustomization
 resources:
   - namespace.yaml
   - serviceaccount.yaml
+  - clustersecretstore.yaml    # ← Add this
+  - external-secret.yaml       # ← Add this
   - deployment.yaml
   - service.yaml
   - ingress.yaml
