@@ -92,14 +92,13 @@ spec:
             - name: DB_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: taskapi-secrets
+                  name: taskapi-secrets    # The Secret that ESO creates from Vault
                   key: db-password
             - name: API_KEY
               valueFrom:
                 secretKeyRef:
                   name: taskapi-secrets
                   key: api-key
-
           # ── Resource limits ─────────────────────────────────────────────────
           # ALWAYS set these in production. Without them:
           # - A memory leak can consume all cluster memory and evict other pods

@@ -1,0 +1,47 @@
+# An ArgoCD AppProject restricts what Applications in this project can do.
+# Think of it as RBAC for ArgoCD itself:
+#   - Only these source repos may be used
+#   - Only these destination namespaces may be deployed to
+#   - Only these Kubernetes resource types may be created
+#
+# Without a project, anyone with ArgoCD access could deploy anything anywhere.
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: taskapi
+  namespace: argocd
+spec:
+  description: "TaskAPI — all environments"
+
+  sourceRepos:
+    - "https://github.com/YOUR_USERNAME/taskapi-gitops"
+
+  destinations:
+    - server: https://kubernetes.default.svc
+      namespace: taskapi-dev
+    - server: https://kubernetes.default.svc
+      namespace: taskapi-staging
+    - server: https://kubernetes.default.svc
+      namespace: taskapi-prod
+
+  clusterResourceWhitelist:
+    - group: ""
+      kind: Namespace
+
+  namespaceResourceWhitelist:
+    - group: "apps"
+      kind: Deployment
+    - group: ""
+      kind: "Service"
+    - group: ""
+      kind: "ServiceAccount"
+    - group: "networking.k8s.io"
+      kind: Ingress
+    - group: "autoscaling"
+      kind: HorizontalPodAutoscaler
+    - group: "external-secrets.io"
+      kind: ExternalSecret
+    - group: "external-secrets.io"
+      kind: ClusterSecretStore
+    - group: "policy"
+      kind: PodDisruptionBudget
