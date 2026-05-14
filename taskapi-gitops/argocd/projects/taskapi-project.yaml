@@ -14,7 +14,7 @@ spec:
   description: "TaskAPI — all environments"
 
   sourceRepos:
-    - "https://github.com/Ajay263/taskapi-gitops"
+    - "https://github.com/ajay263/taskapi-gitops"
 
   destinations:
     - server: https://kubernetes.default.svc
