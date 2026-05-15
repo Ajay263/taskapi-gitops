@@ -1,0 +1,116 @@
+# kube-prometheus-stack configuration
+# This is a production-sensible config trimmed for local KinD
+
+prometheus:
+  prometheusSpec:
+    # How long to keep metrics (uses disk space — 30 days is standard)
+    retention: 30d
+
+    # How often to scrape targets and evaluate alert rules
+    scrapeInterval: 30s
+    evaluationInterval: 30s
+
+    # Allow Prometheus to discover ServiceMonitors in ANY namespace
+    # (not just the 'monitoring' namespace)
+    # Without this, our taskapi ServiceMonitor won't be found
+    serviceMonitorSelectorNilUsesHelmValues: false
+    serviceMonitorSelector: {}
+    serviceMonitorNamespaceSelector: {}
+
+    # Persistent storage so metrics survive pod restarts
+    storageSpec:
+      volumeClaimTemplate:
+        spec:
+          accessModes: ["ReadWriteOnce"]
+          resources:
+            requests:
+              storage: 10Gi
+
+    resources:
+      requests:
+        memory: "400Mi"
+        cpu: "200m"
+      limits:
+        memory: "800Mi"
+        cpu: "400m"
+
+  service:
+    type: NodePort
+    nodePort: 30090   # Maps to host:9090 (configured in KinD Phase 3)
+
+  prometheusSpec:
+    # Run on the infra node (we labelled it workload: infra in Phase 3)
+    nodeSelector:
+      workload: infra
+
+grafana:
+  # Login: admin / devops-training-2024
+  # Use Vault in production — never hardcode passwords in config files
+  adminPassword: "devops-training-2024"
+
+  service:
+    type: NodePort
+    nodePort: 30030   # Maps to host:3000
+
+  # Pre-configure Loki as a data source so we can query logs from Grafana
+  # (We install Loki in Phase 14)
+  additionalDataSources:
+    - name: Loki
+      type: loki
+      url: http://loki.monitoring.svc.cluster.local:3100
+      access: proxy
+      isDefault: false
+
+  # Pre-load community dashboards by their Grafana.com ID
+  dashboardProviders:
+    dashboardproviders.yaml:
+      apiVersion: 1
+      providers:
+        - name: community
+          orgId: 1
+          folder: Community
+          type: file
+          options:
+            path: /var/lib/grafana/dashboards/community
+
+  dashboards:
+    community:
+      # Kubernetes cluster overview (nodes, pods, namespaces)
+      k8s-cluster:
+        gnetId: 7249
+        revision: 1
+        datasource: Prometheus
+      # FastAPI-specific dashboard (matches our metric names)
+      fastapi:
+        gnetId: 16110
+        revision: 1
+        datasource: Prometheus
+
+  resources:
+    requests:
+      memory: "128Mi"
+      cpu: "100m"
+    limits:
+      memory: "256Mi"
+      cpu: "200m"
+
+  nodeSelector:
+    workload: infra
+
+alertmanager:
+  alertmanagerSpec:
+    nodeSelector:
+      workload: infra
+    resources:
+      requests:
+        memory: "64Mi"
+        cpu: "50m"
+      limits:
+        memory: "128Mi"
+        cpu: "100m"
+
+nodeExporter:
+  enabled: true   # System metrics from each node
+
+kubeStateMetrics:
+  enabled: true   # Kubernetes object metrics (pod restart counts, deployment health)
