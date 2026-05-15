@@ -16,6 +16,9 @@ patches:
 
 # Image override — CI pipeline updates this tag after each successful build
 images:
+- name: ghcr.io/ajay263/taskapi
+  newName: ghcr.io/ajay263/taskapi
+  newTag: sha-c990252
 - name: taskapi
   newName: ghcr.io/ajay263/taskapi
   newTag: sha-2bba0a2
