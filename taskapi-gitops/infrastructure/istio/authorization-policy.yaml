@@ -1,0 +1,76 @@
+# AuthorizationPolicy is Istio's service-level firewall.
+# Operates at Layer 7 (HTTP), not Layer 4 (IP/port like NetworkPolicy).
+#
+# Each pod in Istio has a cryptographic identity called a SPIFFE ID:
+#   cluster.local/ns/NAMESPACE/sa/SERVICEACCOUNT
+#
+# AuthorizationPolicy uses these identities to control who can call what.
+# "The 'ingress-nginx' service account in 'ingress-nginx' namespace
+#  can call taskapi with GET/POST on /tasks*, /health, /docs*"
+# This is enforced with mTLS certificates — not just IP addresses.
+
+# 1. Default deny-all for taskapi in staging/prod
+#    Nothing can reach taskapi unless explicitly allowed below
+---
+apiVersion: security.istio.io/v1beta1
+kind: AuthorizationPolicy
+metadata:
+  name: taskapi-deny-all
+  namespace: taskapi-staging
+spec:
+  selector:
+    matchLabels:
+      app: taskapi
+  # action: DENY with no conditions = deny all traffic
+---
+apiVersion: security.istio.io/v1beta1
+kind: AuthorizationPolicy
+metadata:
+  name: taskapi-deny-all
+  namespace: taskapi-prod
+spec:
+  selector:
+    matchLabels:
+      app: taskapi
+---
+# 2. Allow ingress controller to reach taskapi
+apiVersion: security.istio.io/v1beta1
+kind: AuthorizationPolicy
+metadata:
+  name: taskapi-allow-ingress
+  namespace: taskapi-staging
+spec:
+  selector:
+    matchLabels:
+      app: taskapi
+  action: ALLOW
+  rules:
+    - from:
+        - source:
+            principals:
+              - "cluster.local/ns/ingress-nginx/sa/ingress-nginx"
+      to:
+        - operation:
+            methods: ["GET", "POST", "PATCH", "DELETE"]
+            paths: ["/tasks*", "/health", "/docs*", "/openapi.json", "/redoc*"]
+---
+# 3. Allow Prometheus to scrape /metrics
+apiVersion: security.istio.io/v1beta1
+kind: AuthorizationPolicy
+metadata:
+  name: taskapi-allow-prometheus
+  namespace: taskapi-staging
+spec:
+  selector:
+    matchLabels:
+      app: taskapi
+  action: ALLOW
+  rules:
+    - from:
+        - source:
+            principals:
+              - "cluster.local/ns/monitoring/sa/prometheus"
+      to:
+        - operation:
+            methods: ["GET"]
+            paths: ["/metrics"]

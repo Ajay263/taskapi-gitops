@@ -1,0 +1,18 @@
+# PeerAuthentication enforces how traffic between services must be secured.
+# STRICT mode:
+#   - All traffic TO services with Istio sidecars MUST use mTLS
+#   - Plain HTTP connections are REJECTED
+# PERMISSIVE mode (for migration):
+#   - Accepts both mTLS and plain HTTP
+#   - Use PERMISSIVE first if some services don't have sidecars yet
+#
+# We go straight to STRICT because all our services have sidecars.
+# Namespace: istio-system = applies cluster-wide (to all namespaces)
+apiVersion: security.istio.io/v1beta1
+kind: PeerAuthentication
+metadata:
+  name: default
+  namespace: istio-system
+spec:
+  mtls:
+    mode: STRICT
