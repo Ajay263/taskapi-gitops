@@ -1,0 +1,62 @@
+---
+# ── Cluster ──────────────────────────────────────────────────────────────
+cluster_name: taskapi-local
+kubeconfig_path: "{{ lookup('env', 'HOME') }}/.kube/config"
+
+# ── Namespaces ────────────────────────────────────────────────────────────
+namespaces:
+  - taskapi-dev
+  - taskapi-staging
+  - taskapi-prod
+  - vault
+  - argocd
+  - monitoring
+  - external-secrets
+  - iam
+  - gatekeeper-system
+
+# ── Helm repos ────────────────────────────────────────────────────────────
+helm_repos:
+  - name: hashicorp
+    url: https://helm.releases.hashicorp.com
+  - name: external-secrets
+    url: https://charts.external-secrets.io
+  - name: prometheus-community
+    url: https://prometheus-community.github.io/helm-charts
+  - name: grafana
+    url: https://grafana.github.io/helm-charts
+  - name: argo
+    url: https://argoproj.github.io/argo-helm
+
+# ── Vault ─────────────────────────────────────────────────────────────────
+vault_namespace: vault
+vault_addr: "http://127.0.0.1:8200"
+vault_helm_version: "0.27.0"
+
+# ── External Secrets Operator ─────────────────────────────────────────────
+eso_namespace: external-secrets
+eso_helm_version: "0.9.20"
+
+# ── ArgoCD ────────────────────────────────────────────────────────────────
+argocd_namespace: argocd
+argocd_helm_version: "7.3.3"
+argocd_repo_url: "https://github.com/Ajay263/taskapi-gitops"
+argocd_app_path: "taskapi-gitops/overlays/dev"
+
+# ── Monitoring ────────────────────────────────────────────────────────────
+monitoring_namespace: monitoring
+prometheus_helm_version: "58.5.3"
+loki_helm_version: "6.6.2"
+grafana_admin_password: "devops-training-2024"
+
+# ── Keycloak ─────────────────────────────────────────────────────────────
+keycloak_namespace: iam
+keycloak_realm: taskapi
+keycloak_admin_user: admin
+keycloak_url: "http://localhost:8888"
+
+# ── OPA Gatekeeper ───────────────────────────────────────────────────────
+gatekeeper_version: "release-3.14"
+
+# ── Image ─────────────────────────────────────────────────────────────────
+app_image: ghcr.io/ajay263/taskapi

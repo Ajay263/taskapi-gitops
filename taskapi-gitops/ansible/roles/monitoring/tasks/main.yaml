@@ -1,0 +1,112 @@
+---
+- name: Add Prometheus community Helm repo
+  kubernetes.core.helm_repository:
+    name: prometheus-community
+    repo_url: https://prometheus-community.github.io/helm-charts
+
+- name: Add Grafana Helm repo
+  kubernetes.core.helm_repository:
+    name: grafana
+    repo_url: https://grafana.github.io/helm-charts
+
+- name: Create monitoring namespace
+  kubernetes.core.k8s:
+    name: monitoring
+    api_version: v1
+    kind: Namespace
+    state: present
+
+- name: Install kube-prometheus-stack
+  kubernetes.core.helm:
+    name: kube-prometheus-stack
+    chart_ref: prometheus-community/kube-prometheus-stack
+    release_namespace: monitoring
+    values_files:
+      - "{{ role_path }}/files/prometheus-values.yaml"
+    wait: true
+    timeout: "300s"
+
+- name: Install Loki
+  kubernetes.core.helm:
+    name: loki
+    chart_ref: grafana/loki
+    chart_version: "{{ loki_helm_version }}"
+    release_namespace: monitoring
+    values_files:
+      - "{{ role_path }}/files/loki-values.yaml"
+    set_values:
+      - value: loki.useTestSchema=true
+    timeout: "120s"
+
+- name: Install Promtail
+  kubernetes.core.helm:
+    name: promtail
+    chart_ref: grafana/promtail
+    release_namespace: monitoring
+    values_files:
+      - "{{ role_path }}/files/promtail-values.yaml"
+    wait: true
+    timeout: "120s"
+
+- name: Install Tempo
+  kubernetes.core.helm:
+    name: tempo
+    chart_ref: grafana/tempo
+    release_namespace: monitoring
+    values_files:
+      - "{{ role_path }}/files/tempo-values.yaml"
+    wait: true
+    timeout: "120s"
+
+- name: Apply ServiceMonitor for taskapi
+  kubernetes.core.k8s:
+    state: present
+    src: "{{ playbook_dir }}/../infrastructure/monitoring/servicemonitor.yaml"
+
+- name: Apply PrometheusRule alerts
+  kubernetes.core.k8s:
+    state: present
+    src: "{{ playbook_dir }}/../infrastructure/monitoring/prometheusrule.yaml"
+
+- name: Apply SLO recording rules
+  kubernetes.core.k8s:
+    state: present
+    src: "{{ playbook_dir }}/../infrastructure/monitoring/slo-rules.yaml"
+
+- name: Create Slack webhook secret
+  kubernetes.core.k8s:
+    state: present
+    definition:
+      apiVersion: v1
+      kind: Secret
+      metadata:
+        name: slack-webhook-secret
+        namespace: monitoring
+      stringData:
+        webhook-url: "{{ slack_webhook_url }}"
+  no_log: true
+  when: slack_webhook_url is defined and slack_webhook_url != ""
+
+- name: Wait for Grafana to be ready
+  kubernetes.core.k8s_info:
+    kind: Deployment
+    name: kube-prometheus-stack-grafana
+    namespace: monitoring
+    wait: true
+    wait_condition:
+      type: Available
+      status: "True"
+    wait_timeout: 180
+
+- name: Start Grafana port-forward for dashboard import
+  ansible.builtin.shell: |
+    pkill -f "port-forward.*3001" 2>/dev/null || true
+    kubectl port-forward -n monitoring svc/kube-prometheus-stack-grafana 3001:80 &
+    sleep 5
+  changed_when: false
+
+- name: Import Grafana dashboards
+  ansible.builtin.script:
+    cmd: "{{ role_path }}/files/import-dashboards.sh"
+  changed_when: false
+  ignore_errors: true

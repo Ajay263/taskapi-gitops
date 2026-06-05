@@ -1,0 +1,39 @@
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+name: {{ kind_cluster_name }}
+nodes:
+  - role: control-plane
+    kubeadmConfigPatches:
+      - |
+        kind: InitConfiguration
+        nodeRegistration:
+          kubeletExtraArgs:
+            node-labels: "ingress-ready=true"
+    extraPortMappings:
+      - containerPort: 30080
+        hostPort: 8080
+        protocol: TCP
+      - containerPort: 30443
+        hostPort: 8443
+        protocol: TCP
+      - containerPort: 30090
+        hostPort: 9090
+        protocol: TCP
+      - containerPort: 30030
+        hostPort: 3000
+        protocol: TCP
+      - containerPort: 30200
+        hostPort: 8200
+        protocol: TCP
+      - containerPort: 30686
+        hostPort: 16686
+        protocol: TCP
+  - role: worker
+    labels:
+      workload: app
+  - role: worker
+    labels:
+      workload: infra
+networking:
+  podSubnet: "10.244.0.0/16"
+  serviceSubnet: "10.96.0.0/12"

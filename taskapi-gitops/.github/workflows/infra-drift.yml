@@ -1,0 +1,50 @@
+name: Infrastructure Drift Detection
+
+on:
+  schedule:
+    - cron: '0 6 * * *'   # Every day at 6am UTC
+  workflow_dispatch:
+
+jobs:
+  detect-drift:
+    name: "🔎 Detect Configuration Drift"
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install tools
+        run: |
+          pip install ansible jmespath
+          ansible-galaxy collection install kubernetes.core community.general
+
+      - name: Write vault password
+        run: echo "${{ secrets.ANSIBLE_VAULT_PASSWORD }}" > ansible/.vault_pass
+
+      - name: Run Ansible in check mode (drift detection)
+        id: drift
+        env:
+          GITOPS_PAT: ${{ secrets.GITOPS_PAT }}
+        run: |
+          ansible-playbook ansible/playbooks/site.yaml \
+            --vault-password-file ansible/.vault_pass \
+            --check --diff \
+            -v 2>&1 | tee /tmp/drift-report.txt
+          echo "exit_code=$?" >> $GITHUB_OUTPUT
+        continue-on-error: true
+
+      - name: Open GitHub Issue if drift detected
+        if: steps.drift.outputs.exit_code != '0'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const report = fs.readFileSync('/tmp/drift-report.txt', 'utf8');
+            const truncated = report.slice(-3000);
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: `🚨 Infrastructure Drift Detected — ${new Date().toISOString().split('T')[0]}`,
+              body: `## Configuration Drift Detected\n\nAnsible detected differences between the desired state (Git) and the actual state (cluster).\n\n**Run this to fix:**\n\`\`\`\ngit push  # triggers infra-deploy workflow\n\`\`\`\n\n### Drift Report\n\`\`\`\n${truncated}\n\`\`\``,
+              labels: ['infrastructure', 'drift', 'automated']
+            });

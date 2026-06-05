@@ -1,0 +1,83 @@
+---
+- name: Verify cluster is reachable
+  kubernetes.core.k8s_info:
+    kind: Node
+  register: nodes
+  failed_when: nodes.resources | length == 0
+
+- name: Verify all nodes are Ready
+  assert:
+    that: >
+      item.status.conditions |
+      selectattr('type','eq','Ready') |
+      map(attribute='status') | first == 'True'
+    fail_msg: "Node {{ item.metadata.name }} is not Ready"
+  loop: "{{ nodes.resources }}"
+
+- name: Verify taskapi pod is running
+  kubernetes.core.k8s_info:
+    kind: Pod
+    namespace: taskapi-dev
+    label_selectors:
+      - app=taskapi
+  register: taskapi_pods
+  failed_when: taskapi_pods.resources | length == 0
+
+- name: Verify taskapi health endpoint
+  ansible.builtin.uri:
+    url: http://localhost:8080/api/health
+    status_code: 200
+  register: health
+  retries: 5
+  delay: 10
+
+- name: Assert vault_secret is ok
+  assert:
+    that: health.json.checks.vault_secret == 'ok'
+    fail_msg: "Vault secret not injected — run vault playbook"
+
+- name: Verify Prometheus is running
+  kubernetes.core.k8s_info:
+    kind: Pod
+    namespace: monitoring
+    label_selectors:
+      - app.kubernetes.io/name=prometheus
+  register: prom_pods
+  failed_when: prom_pods.resources | length == 0
+
+- name: Verify Grafana is running
+  kubernetes.core.k8s_info:
+    kind: Pod
+    namespace: monitoring
+    label_selectors:
+      - app.kubernetes.io/name=grafana
+  register: grafana_pods
+  failed_when: grafana_pods.resources | length == 0
+
+- name: Verify ArgoCD is running
+  kubernetes.core.k8s_info:
+    kind: Pod
+    namespace: argocd
+    label_selectors:
+      - app.kubernetes.io/name=argocd-server
+  register: argocd_pods
+  failed_when: argocd_pods.resources | length == 0
+
+- name: Verify OPA Gatekeeper constraint exists
+  kubernetes.core.k8s_info:
+    api_version: constraints.gatekeeper.sh/v1beta1
+    kind: RequireNonRoot
+    name: require-non-root
+  register: constraint
+
+- name: Print verification summary
+  ansible.builtin.debug:
+    msg:
+      - "✅ Cluster: {{ nodes.resources | length }} nodes Ready"
+      - "✅ TaskAPI: {{ taskapi_pods.resources | length }} pod(s) running"
+      - "✅ Health: {{ health.json.status }}"
+      - "✅ Vault secret: {{ health.json.checks.vault_secret }}"
+      - "✅ Prometheus: {{ prom_pods.resources | length }} pod(s)"
+      - "✅ Grafana: {{ grafana_pods.resources | length }} pod(s)"
+      - "✅ ArgoCD: {{ argocd_pods.resources | length }} pod(s)"
+      - "✅ OPA constraint: {{ 'active' if constraint.resources else 'missing' }}"

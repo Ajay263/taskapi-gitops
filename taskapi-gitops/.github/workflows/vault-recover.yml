@@ -1,0 +1,28 @@
+name: Vault Recovery
+
+on:
+  workflow_dispatch:
+    inputs:
+      reason:
+        description: 'Why are you recovering Vault?'
+        required: true
+        default: 'Codespace restart'
+
+jobs:
+  recover:
+    name: "🔐 Recover Vault"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install tools
+        run: pip install ansible jmespath && ansible-galaxy collection install kubernetes.core
+      - name: Write vault password
+        run: echo "${{ secrets.ANSIBLE_VAULT_PASSWORD }}" > ansible/.vault_pass
+      - name: Run Vault recovery playbook
+        run: |
+          ansible-playbook ansible/playbooks/vault.yaml \
+            --vault-password-file ansible/.vault_pass -v
+      - name: Verify
+        run: |
+          ansible-playbook ansible/playbooks/verify.yaml \
+            --vault-password-file ansible/.vault_pass -v

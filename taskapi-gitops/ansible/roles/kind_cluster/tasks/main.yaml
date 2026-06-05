@@ -1,0 +1,83 @@
+---
+- name: Check if KinD cluster already exists
+  ansible.builtin.command: kind get clusters
+  register: existing_clusters
+  changed_when: false
+
+- name: Create KinD cluster config
+  ansible.builtin.template:
+    src: kind-config.yaml.j2
+    dest: /tmp/kind-config.yaml
+    mode: '0644'
+  when: kind_cluster_name not in existing_clusters.stdout
+
+- name: Create KinD cluster
+  ansible.builtin.command: >
+    kind create cluster
+    --config /tmp/kind-config.yaml
+    --wait {{ kind_wait_timeout }}
+  when: kind_cluster_name not in existing_clusters.stdout
+  register: kind_create
+  changed_when: kind_create.rc == 0
+
+- name: Export kubeconfig
+  ansible.builtin.command: "kind export kubeconfig --name {{ kind_cluster_name }}"
+  changed_when: false
+
+- name: Wait for all nodes to be Ready
+  kubernetes.core.k8s_info:
+    kind: Node
+    wait: true
+    wait_condition:
+      type: Ready
+      status: "True"
+    wait_timeout: 120
+  register: nodes
+
+- name: Show node status
+  ansible.builtin.debug:
+    msg: "Node {{ item.metadata.name }} is {{ item.status.conditions | selectattr('type','eq','Ready') | map(attribute='status') | first }}"
+  loop: "{{ nodes.resources }}"
+
+- name: Patch NGINX Ingress NodePort to 30080
+  kubernetes.core.k8s:
+    state: present
+    definition:
+      apiVersion: v1
+      kind: Service
+      metadata:
+        name: ingress-nginx-controller
+        namespace: ingress-nginx
+      spec:
+        ports:
+          - port: 80
+            nodePort: 30080
+            name: http
+          - port: 443
+            nodePort: 30443
+            name: https
+  ignore_errors: true
+
+- name: Label infra worker node
+  kubernetes.core.k8s:
+    state: present
+    definition:
+      apiVersion: v1
+      kind: Node
+      metadata:
+        name: "{{ kind_cluster_name }}-worker2"
+        labels:
+          workload: infra
+  ignore_errors: true
+
+- name: Label app worker node
+  kubernetes.core.k8s:
+    state: present
+    definition:
+      apiVersion: v1
+      kind: Node
+      metadata:
+        name: "{{ kind_cluster_name }}-worker"
+        labels:
+          workload: app
+  ignore_errors: true

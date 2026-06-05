@@ -1,0 +1,23 @@
+name: Infrastructure Verify
+
+on:
+  workflow_run:
+    workflows: ["CI Pipeline"]
+    types: [completed]
+    branches: [main]
+
+jobs:
+  verify:
+    name: "✅ Verify Infrastructure"
+    runs-on: ubuntu-latest
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install tools
+        run: pip install ansible jmespath && ansible-galaxy collection install kubernetes.core
+      - name: Write vault password
+        run: echo "${{ secrets.ANSIBLE_VAULT_PASSWORD }}" > ansible/.vault_pass
+      - name: Run verification
+        run: |
+          ansible-playbook ansible/playbooks/verify.yaml \
+            --vault-password-file ansible/.vault_pass -v

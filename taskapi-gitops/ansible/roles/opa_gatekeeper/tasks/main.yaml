@@ -1,0 +1,68 @@
+---
+- name: Install OPA Gatekeeper
+  kubernetes.core.k8s:
+    state: present
+    src: "https://raw.githubusercontent.com/open-policy-agent/gatekeeper/{{ gatekeeper_version }}/deploy/gatekeeper.yaml"
+
+- name: Wait for Gatekeeper controller
+  kubernetes.core.k8s_info:
+    kind: Deployment
+    name: gatekeeper-controller-manager
+    namespace: gatekeeper-system
+    wait: true
+    wait_condition:
+      type: Available
+      status: "True"
+    wait_timeout: 120
+
+- name: Apply RequireNonRoot constraint template
+  kubernetes.core.k8s:
+    state: present
+    definition:
+      apiVersion: templates.gatekeeper.sh/v1
+      kind: ConstraintTemplate
+      metadata:
+        name: requirenonroot
+      spec:
+        crd:
+          spec:
+            names:
+              kind: RequireNonRoot
+        targets:
+          - target: admission.k8s.gatekeeper.sh
+            rego: |
+              package requirenonroot
+              violation[{"msg": msg}] {
+                not input.review.object.spec.securityContext.runAsNonRoot
+                msg := "Containers must not run as root"
+              }
+
+- name: Apply RequireNonRoot constraint
+  kubernetes.core.k8s:
+    state: present
+    definition:
+      apiVersion: constraints.gatekeeper.sh/v1beta1
+      kind: RequireNonRoot
+      metadata:
+        name: require-non-root
+      spec:
+        enforcementAction: deny
+        match:
+          kinds:
+            - apiGroups: ["*"]
+              kinds: ["Pod"]
+          namespaces:
+            - taskapi-dev
+            - taskapi-staging
+            - taskapi-prod
+
+- name: Verify constraint is active
+  kubernetes.core.k8s_info:
+    api_version: constraints.gatekeeper.sh/v1beta1
+    kind: RequireNonRoot
+    name: require-non-root
+  register: constraint_status
+
+- name: Show constraint status
+  ansible.builtin.debug:
+    msg: "OPA constraint require-non-root is {{ 'active' if constraint_status.resources else 'NOT found' }}"

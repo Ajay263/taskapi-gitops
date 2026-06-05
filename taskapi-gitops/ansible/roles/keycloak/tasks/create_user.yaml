@@ -1,0 +1,38 @@
+---
+- name: "Create user {{ user_item.username }}"
+  ansible.builtin.uri:
+    url: "{{ keycloak_url }}/admin/realms/{{ keycloak_realm }}/users"
+    method: POST
+    headers:
+      Authorization: "Bearer {{ keycloak_token.json.access_token }}"
+    body_format: json
+    body:
+      username: "{{ user_item.username }}"
+      firstName: "{{ user_item.firstName }}"
+      lastName: "{{ user_item.lastName }}"
+      email: "{{ user_item.email }}"
+      enabled: true
+      emailVerified: true
+      credentials:
+        - type: password
+          value: "{{ user_item.password }}"
+          temporary: false
+    status_code: [201, 409]
+  no_log: true
+
+- name: "Get user ID for {{ user_item.username }}"
+  ansible.builtin.uri:
+    url: "{{ keycloak_url }}/admin/realms/{{ keycloak_realm }}/users?username={{ user_item.username }}"
+    headers:
+      Authorization: "Bearer {{ keycloak_token.json.access_token }}"
+    status_code: 200
+  register: user_result
+
+- name: "Assign groups for {{ user_item.username }}"
+  ansible.builtin.include_tasks: assign_group.yaml
+  loop: "{{ user_item.groups }}"
+  loop_control:
+    loop_var: group_name
+  vars:
+    user_id: "{{ user_result.json[0].id }}"
+  when: user_result.json | length > 0

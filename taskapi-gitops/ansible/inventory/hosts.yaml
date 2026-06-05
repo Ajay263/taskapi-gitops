@@ -1,0 +1,13 @@
+---
+# For KinD, we run everything locally via kubectl
+# The 'connection: local' means Ansible runs commands on the GitHub Actions runner
+# itself, which has kubectl configured to talk to the KinD cluster
+all:
+  hosts:
+    localhost:
+      ansible_connection: local
+      ansible_python_interpreter: "{{ ansible_playbook_python }}"
+  children:
+    k8s:
+      hosts:
+        localhost:

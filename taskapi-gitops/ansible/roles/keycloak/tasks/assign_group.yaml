@@ -1,0 +1,17 @@
+---
+- name: "Get group ID for {{ group_name }}"
+  ansible.builtin.uri:
+    url: "{{ keycloak_url }}/admin/realms/{{ keycloak_realm }}/groups?search={{ group_name }}"
+    headers:
+      Authorization: "Bearer {{ keycloak_token.json.access_token }}"
+    status_code: 200
+  register: group_result
+
+- name: "Assign {{ user_id }} to group {{ group_name }}"
+  ansible.builtin.uri:
+    url: "{{ keycloak_url }}/admin/realms/{{ keycloak_realm }}/users/{{ user_id }}/groups/{{ group_result.json[0].id }}"
+    method: PUT
+    headers:
+      Authorization: "Bearer {{ keycloak_token.json.access_token }}"
+    status_code: [200, 204]
+  when: group_result.json | length > 0

@@ -1,0 +1,28 @@
+---
+# Master playbook: provisions the entire TaskAPI platform
+# Usage: ansible-playbook ansible/playbooks/site.yaml
+- name: Provision TaskAPI Platform
+  hosts: localhost
+  connection: local
+  gather_facts: true
+  vars_files:
+    - ../group_vars/all.yaml
+    - ../group_vars/all.vault.yaml
+
+  roles:
+    - role: ../roles/kind_cluster
+      tags: [cluster, always]
+    - role: ../roles/vault
+      tags: [vault, secrets]
+    - role: ../roles/external_secrets
+      tags: [secrets, eso]
+    - role: ../roles/argocd
+      tags: [argocd, gitops]
+    - role: ../roles/monitoring
+      tags: [monitoring, observability]
+    - role: ../roles/keycloak
+      tags: [keycloak, iam, security]
+    - role: ../roles/opa_gatekeeper
+      tags: [security, opa]
+    - role: ../roles/verify
+      tags: [verify, always]

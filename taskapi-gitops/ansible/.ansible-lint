@@ -1,0 +1,10 @@
+profile: basic
+skip_list:
+  - role-name[path]
+  - var-naming[no-role-prefix]
+  - ignore-errors
+  - risky-shell-pipe
+  - name[template]
+  - jinja[spacing]
+  - yaml[new-line-at-end-of-file]
+  - fqcn[action-core]
