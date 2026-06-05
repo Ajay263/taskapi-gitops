@@ -33,7 +33,7 @@ on:
 jobs:
   lint:
     name: "🔍 Ansible Lint"
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     defaults:
       run:
         working-directory: taskapi-gitops/ansible
@@ -41,7 +41,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Install Ansible
-        run: pip install ansible ansible-lint
+        run: pip install ansible ansible-lint --break-system-packages
 
       - name: Install collections
         run: ansible-galaxy collection install kubernetes.core community.general
@@ -57,7 +57,7 @@ jobs:
 
   deploy:
     name: "🚀 Run Ansible Playbook"
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     needs: lint
     defaults:
       run:
@@ -66,15 +66,20 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install tools
+      - name: Install Python dependencies
+        run: pip install ansible jmespath kubernetes --break-system-packages
+
+      - name: Install Ansible collections
+        run: ansible-galaxy collection install kubernetes.core community.general
+
+      - name: Setup kubeconfig for runner
         run: |
-          pip install ansible jmespath kubernetes
-          ansible-galaxy collection install kubernetes.core community.general
-          curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
-          chmod +x kubectl && sudo mv kubectl /usr/local/bin/
-          curl -Lo ./kind https://kind.sigs.k8s.io/dl/v0.20.0/kind-linux-amd64
-          chmod +x kind && sudo mv kind /usr/local/bin/
-          curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+          mkdir -p $HOME/.kube
+          # Export kubeconfig from KinD cluster
+          kind export kubeconfig --name taskapi-local --kubeconfig $HOME/.kube/config
+          # Verify connectivity
+          kubectl cluster-info
+          kubectl get nodes
 
       - name: Write vault password
         run: echo "${{ secrets.ANSIBLE_VAULT_PASSWORD }}" > .vault_pass
@@ -90,6 +95,7 @@ jobs:
           GITOPS_PAT: ${{ secrets.GITOPS_PAT }}
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
           ANSIBLE_VAULT_PASSWORD_FILE: .vault_pass
+          KUBECONFIG: ${{ env.HOME }}/.kube/config
         run: |
           CHECK_FLAG=""
           if [ "${{ github.event.inputs.check_mode }}" = "true" ]; then

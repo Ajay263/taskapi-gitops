@@ -8,7 +8,7 @@ on:
 jobs:
   detect-drift:
     name: "🔎 Detect Configuration Drift"
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     defaults:
       run:
         working-directory: taskapi-gitops/ansible
@@ -16,9 +16,16 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Install tools
+        run: pip install ansible jmespath kubernetes --break-system-packages
+
+      - name: Install collections
+        run: ansible-galaxy collection install kubernetes.core community.general
+
+      - name: Setup kubeconfig
         run: |
-          pip install ansible jmespath kubernetes
-          ansible-galaxy collection install kubernetes.core community.general
+          mkdir -p $HOME/.kube
+          kind export kubeconfig --name taskapi-local --kubeconfig $HOME/.kube/config
+          kubectl cluster-info
 
       - name: Write vault password
         run: echo "${{ secrets.ANSIBLE_VAULT_PASSWORD }}" > .vault_pass
@@ -27,6 +34,7 @@ jobs:
         id: drift
         env:
           ANSIBLE_VAULT_PASSWORD_FILE: .vault_pass
+          KUBECONFIG: ${{ env.HOME }}/.kube/config
         run: |
           ansible-playbook playbooks/verify.yaml \
             -e "ansible_python_interpreter=$(which python3)" \
