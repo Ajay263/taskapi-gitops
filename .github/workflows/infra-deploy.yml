@@ -4,14 +4,14 @@ on:
   push:
     branches: [main]
     paths:
-      - 'ansible/**'
+      - 'taskapi-gitops/ansible/**'
       - 'taskapi-gitops/infrastructure/**'
   workflow_dispatch:
     inputs:
       playbook:
         description: 'Which playbook to run'
         required: true
-        default: 'site'
+        default: 'verify'
         type: choice
         options:
           - site
@@ -22,95 +22,89 @@ on:
           - security
           - verify
       check_mode:
-        description: 'Dry run (check mode)?'
+        description: 'Dry run only?'
         required: false
-        default: false
-        type: boolean
+        default: 'false'
+        type: choice
+        options:
+          - 'false'
+          - 'true'
 
 jobs:
   lint:
     name: "🔍 Ansible Lint"
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: taskapi-gitops/ansible
     steps:
       - uses: actions/checkout@v4
 
       - name: Install Ansible
-        run: |
-          pip install ansible ansible-lint
+        run: pip install ansible ansible-lint
+
+      - name: Install collections
+        run: ansible-galaxy collection install kubernetes.core community.general
+
+      - name: Write vault password
+        run: echo "${{ secrets.ANSIBLE_VAULT_PASSWORD }}" > .vault_pass
 
       - name: Run ansible-lint
-        run: |
-          cd ansible
-          ansible-lint playbooks/site.yaml --profile=production
+        env:
+          ANSIBLE_VAULT_PASSWORD_FILE: .vault_pass
+        run: ansible-lint playbooks/site.yaml
         continue-on-error: true
 
   deploy:
-    name: "🚀 Deploy Infrastructure"
+    name: "🚀 Run Ansible Playbook"
     runs-on: ubuntu-latest
     needs: lint
-    environment: infrastructure
+    defaults:
+      run:
+        working-directory: taskapi-gitops/ansible
 
     steps:
       - uses: actions/checkout@v4
 
       - name: Install tools
         run: |
-          pip install ansible jmespath
+          pip install ansible jmespath kubernetes
           ansible-galaxy collection install kubernetes.core community.general
-          # Install kubectl
           curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
           chmod +x kubectl && sudo mv kubectl /usr/local/bin/
-          # Install kind
           curl -Lo ./kind https://kind.sigs.k8s.io/dl/v0.20.0/kind-linux-amd64
-          chmod +x ./kind && sudo mv ./kind /usr/local/bin/
-          # Install helm
+          chmod +x kind && sudo mv kind /usr/local/bin/
           curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
-          # Install argocd CLI
-          curl -sSL -o argocd-linux-amd64 https://github.com/argoproj/argo-cd/releases/latest/download/argocd-linux-amd64
-          sudo install -m 555 argocd-linux-amd64 /usr/local/bin/argocd
 
-      - name: Write Ansible vault password
-        run: echo "${{ secrets.ANSIBLE_VAULT_PASSWORD }}" > ansible/.vault_pass
-        
+      - name: Write vault password
+        run: echo "${{ secrets.ANSIBLE_VAULT_PASSWORD }}" > .vault_pass
+
       - name: Select playbook
         id: playbook
         run: |
-          PLAYBOOK="${{ github.event.inputs.playbook || 'site' }}"
-          echo "path=ansible/playbooks/${PLAYBOOK}.yaml" >> $GITHUB_OUTPUT
-          echo "Running playbook: ${PLAYBOOK}"
+          PLAYBOOK="${{ github.event.inputs.playbook || 'verify' }}"
+          echo "name=${PLAYBOOK}" >> $GITHUB_OUTPUT
 
       - name: Run Ansible playbook
         env:
           GITOPS_PAT: ${{ secrets.GITOPS_PAT }}
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
-          ANSIBLE_VAULT_PASSWORD: ${{ secrets.ANSIBLE_VAULT_PASSWORD }}
+          ANSIBLE_VAULT_PASSWORD_FILE: .vault_pass
         run: |
           CHECK_FLAG=""
           if [ "${{ github.event.inputs.check_mode }}" = "true" ]; then
             CHECK_FLAG="--check --diff"
           fi
-
-          ansible-playbook ${{ steps.playbook.outputs.path }} \
-            --vault-password-file ansible/.vault_pass \
+          ansible-playbook playbooks/${{ steps.playbook.outputs.name }}.yaml \
             -e "ansible_python_interpreter=$(which python3)" \
-            $CHECK_FLAG \
-            -v
-
-      - name: Run verification
-        if: success() && github.event.inputs.check_mode != 'true'
-        run: |
-          ansible-playbook ansible/playbooks/verify.yaml \
-            --vault-password-file ansible/.vault_pass \
-            -v
+            $CHECK_FLAG -v
 
       - name: Notify Slack on success
         if: success()
         uses: slackapi/slack-github-action@v1.26.0
         with:
           payload: |
-            {
-              "text": "✅ Infrastructure deploy succeeded\nPlaybook: ${{ steps.playbook.outputs.path }}\nCommit: ${{ github.sha }}"
-            }
+            {"text": "✅ Ansible playbook *${{ steps.playbook.outputs.name }}* succeeded\nCommit: ${{ github.sha }}"}
         env:
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
         continue-on-error: true
@@ -120,9 +114,7 @@ jobs:
         uses: slackapi/slack-github-action@v1.26.0
         with:
           payload: |
-            {
-              "text": "❌ Infrastructure deploy FAILED\nPlaybook: ${{ steps.playbook.outputs.path }}\nSee: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
-            }
+            {"text": "❌ Ansible playbook *${{ steps.playbook.outputs.name }}* FAILED\nSee: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"}
         env:
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
         continue-on-error: true

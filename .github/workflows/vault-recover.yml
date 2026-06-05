@@ -6,23 +6,36 @@ on:
       reason:
         description: 'Why are you recovering Vault?'
         required: true
-        default: 'Codespace restart'
+        default: 'Codespace restart — Vault lost in-memory data'
 
 jobs:
   recover:
     name: "🔐 Recover Vault"
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: taskapi-gitops/ansible
     steps:
       - uses: actions/checkout@v4
+
       - name: Install tools
-        run: pip install ansible jmespath && ansible-galaxy collection install kubernetes.core
+        run: |
+          pip install ansible jmespath kubernetes
+          ansible-galaxy collection install kubernetes.core community.general
+
       - name: Write vault password
-        run: echo "${{ secrets.ANSIBLE_VAULT_PASSWORD }}" > ansible/.vault_pass
-      - name: Run Vault recovery playbook
+        run: echo "${{ secrets.ANSIBLE_VAULT_PASSWORD }}" > .vault_pass
+
+      - name: Run Vault recovery
+        env:
+          ANSIBLE_VAULT_PASSWORD_FILE: .vault_pass
         run: |
-          ansible-playbook ansible/playbooks/vault.yaml \
-            --vault-password-file ansible/.vault_pass -v
-      - name: Verify
+          ansible-playbook playbooks/vault.yaml \
+            -e "ansible_python_interpreter=$(which python3)" -v
+
+      - name: Verify after recovery
+        env:
+          ANSIBLE_VAULT_PASSWORD_FILE: .vault_pass
         run: |
-          ansible-playbook ansible/playbooks/verify.yaml \
-            --vault-password-file ansible/.vault_pass -v
+          ansible-playbook playbooks/verify.yaml \
+            -e "ansible_python_interpreter=$(which python3)" -v

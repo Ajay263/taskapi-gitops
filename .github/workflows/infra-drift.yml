@@ -2,35 +2,36 @@ name: Infrastructure Drift Detection
 
 on:
   schedule:
-    - cron: '0 6 * * *'   # Every day at 6am UTC
+    - cron: '0 6 * * *'
   workflow_dispatch:
 
 jobs:
   detect-drift:
     name: "🔎 Detect Configuration Drift"
     runs-on: ubuntu-latest
-
+    defaults:
+      run:
+        working-directory: taskapi-gitops/ansible
     steps:
       - uses: actions/checkout@v4
 
       - name: Install tools
         run: |
-          pip install ansible jmespath
+          pip install ansible jmespath kubernetes
           ansible-galaxy collection install kubernetes.core community.general
 
       - name: Write vault password
-        run: echo "${{ secrets.ANSIBLE_VAULT_PASSWORD }}" > ansible/.vault_pass
+        run: echo "${{ secrets.ANSIBLE_VAULT_PASSWORD }}" > .vault_pass
 
-      - name: Run Ansible in check mode (drift detection)
+      - name: Run Ansible verify in check mode
         id: drift
         env:
-          GITOPS_PAT: ${{ secrets.GITOPS_PAT }}
+          ANSIBLE_VAULT_PASSWORD_FILE: .vault_pass
         run: |
-          ansible-playbook ansible/playbooks/site.yaml \
-            --vault-password-file ansible/.vault_pass \
-            --check --diff \
-            -v 2>&1 | tee /tmp/drift-report.txt
-          echo "exit_code=$?" >> $GITHUB_OUTPUT
+          ansible-playbook playbooks/verify.yaml \
+            -e "ansible_python_interpreter=$(which python3)" \
+            --check --diff -v 2>&1 | tee /tmp/drift-report.txt
+          echo "exit_code=${PIPESTATUS[0]}" >> $GITHUB_OUTPUT
         continue-on-error: true
 
       - name: Open GitHub Issue if drift detected
@@ -39,12 +40,21 @@ jobs:
         with:
           script: |
             const fs = require('fs');
-            const report = fs.readFileSync('/tmp/drift-report.txt', 'utf8');
-            const truncated = report.slice(-3000);
+            const report = fs.readFileSync('/tmp/drift-report.txt', 'utf8').slice(-3000);
             await github.rest.issues.create({
               owner: context.repo.owner,
               repo: context.repo.repo,
               title: `🚨 Infrastructure Drift Detected — ${new Date().toISOString().split('T')[0]}`,
-              body: `## Configuration Drift Detected\n\nAnsible detected differences between the desired state (Git) and the actual state (cluster).\n\n**Run this to fix:**\n\`\`\`\ngit push  # triggers infra-deploy workflow\n\`\`\`\n\n### Drift Report\n\`\`\`\n${truncated}\n\`\`\``,
-              labels: ['infrastructure', 'drift', 'automated']
+              body: `## Drift Detected\n\nAnsible found differences between Git and cluster state.\n\n### Report\n\`\`\`\n${report}\n\`\`\``,
+              labels: ['infrastructure', 'drift']
             });
+
+      - name: Notify Slack if drift found
+        if: steps.drift.outputs.exit_code != '0'
+        uses: slackapi/slack-github-action@v1.26.0
+        with:
+          payload: |
+            {"text": "🚨 Infrastructure drift detected!\n${{ github.server_url }}/${{ github.repository }}/issues"}
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+        continue-on-error: true

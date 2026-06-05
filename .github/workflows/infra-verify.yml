@@ -1,23 +1,41 @@
 name: Infrastructure Verify
 
 on:
-  workflow_run:
-    workflows: ["CI Pipeline"]
-    types: [completed]
-    branches: [main]
+  schedule:
+    - cron: '0 */6 * * *'
+  workflow_dispatch:
 
 jobs:
   verify:
-    name: "✅ Verify Infrastructure"
+    name: "✅ Verify Full Stack"
     runs-on: ubuntu-latest
-    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    defaults:
+      run:
+        working-directory: taskapi-gitops/ansible
     steps:
       - uses: actions/checkout@v4
+
       - name: Install tools
-        run: pip install ansible jmespath && ansible-galaxy collection install kubernetes.core
-      - name: Write vault password
-        run: echo "${{ secrets.ANSIBLE_VAULT_PASSWORD }}" > ansible/.vault_pass
-      - name: Run verification
         run: |
-          ansible-playbook ansible/playbooks/verify.yaml \
-            --vault-password-file ansible/.vault_pass -v
+          pip install ansible jmespath kubernetes
+          ansible-galaxy collection install kubernetes.core community.general
+
+      - name: Write vault password
+        run: echo "${{ secrets.ANSIBLE_VAULT_PASSWORD }}" > .vault_pass
+
+      - name: Run verification
+        env:
+          ANSIBLE_VAULT_PASSWORD_FILE: .vault_pass
+        run: |
+          ansible-playbook playbooks/verify.yaml \
+            -e "ansible_python_interpreter=$(which python3)" -v
+
+      - name: Notify Slack on failure
+        if: failure()
+        uses: slackapi/slack-github-action@v1.26.0
+        with:
+          payload: |
+            {"text": "⚠️ Infrastructure verification FAILED\nSee: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"}
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+        continue-on-error: true
