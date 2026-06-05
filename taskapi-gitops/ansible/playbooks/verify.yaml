@@ -3,20 +3,23 @@
   hosts: localhost
   connection: local
   gather_facts: false
+  vars:
+    cluster_name: taskapi-local
+    kind_cluster_name: taskapi-local
   vars_files:
     - ../group_vars/all.yaml
     - ../group_vars/all.vault.yaml
 
   pre_tasks:
-    - name: Create cluster if it does not exist
+    - name: Check if cluster exists
       ansible.builtin.command: kind get clusters
       register: verify_existing_clusters
       changed_when: false
 
-    - name: Bootstrap cluster for verify
+    - name: Bootstrap cluster if missing
       ansible.builtin.include_role:
         name: ../roles/kind_cluster
-      when: cluster_name not in verify_existing_clusters.stdout
+      when: kind_cluster_name not in verify_existing_clusters.stdout
 
   roles:
     - role: ../roles/verify
