@@ -39,29 +39,10 @@
   register: argocd_password
   changed_when: false
 
-- name: Start ArgoCD port-forward
+- name: Add GitOps repository to ArgoCD via kubectl
   ansible.builtin.shell: |
-    pkill -f "port-forward.*argocd.*8443" 2>/dev/null || true
-    kubectl port-forward svc/argocd-server -n argocd 8443:443 &
-    sleep 5
-  changed_when: false
-
-- name: Login to ArgoCD CLI
-  ansible.builtin.command: >
-    argocd login localhost:8443
-    --username admin
-    --password "{{ argocd_password.stdout }}"
-    --insecure
-  changed_when: false
-
-- name: Add GitOps repository to ArgoCD
-  ansible.builtin.command: >
-    argocd repo add {{ argocd_repo_url }}
-    --username Ajay263
-    --password {{ argocd_repo_token }}
-    --insecure-skip-server-verification
-    --upsert
-  changed_when: false
+    kubectl create secret generic argocd-repo-taskapi-gitops       --namespace argocd       --from-literal=type=git       --from-literal=url={{ argocd_repo_url }}       --from-literal=username=Ajay263       --from-literal=password={{ argocd_repo_token }}       --dry-run=client -o yaml |     kubectl annotate --local -f -       managed-by=argocd.argoproj.io       --dry-run=client -o yaml |     kubectl label --local -f -       argocd.argoproj.io/secret-type=repository       --dry-run=client -o yaml |     kubectl apply -f -
+  changed_when: true
   no_log: true
 
 - name: Apply ArgoCD AppProject
