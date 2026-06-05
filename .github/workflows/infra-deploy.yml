@@ -81,7 +81,6 @@ jobs:
           sed -i "s|https://127.0.0.1:[0-9]*|https://${CONTROL_PLANE_IP}:6443|g" $HOME/.kube/config
           echo "KUBECONFIG=$HOME/.kube/config" >> $GITHUB_ENV
           kubectl cluster-info
-          echo "KUBECONFIG=$HOME/.kube/config" >> $GITHUB_ENV --kubeconfig $HOME/.kube/config
           # Verify connectivity
           kubectl cluster-info
           kubectl get nodes
