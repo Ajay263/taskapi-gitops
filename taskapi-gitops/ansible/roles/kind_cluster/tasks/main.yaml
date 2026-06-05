@@ -1,83 +1,74 @@
 ---
 - name: Check if KinD cluster already exists
   ansible.builtin.command: kind get clusters
-  register: existing_clusters
+  register: kind_existing_clusters
   changed_when: false
 
 - name: Create KinD cluster config
   ansible.builtin.template:
     src: kind-config.yaml.j2
     dest: /tmp/kind-config.yaml
-    mode: '0644'
-  when: kind_cluster_name not in existing_clusters.stdout
+    mode: "0644"
+  when: kind_cluster_name not in kind_existing_clusters.stdout
 
 - name: Create KinD cluster
   ansible.builtin.command: >
     kind create cluster
     --config /tmp/kind-config.yaml
-    --wait {{ kind_wait_timeout }}
-  when: kind_cluster_name not in existing_clusters.stdout
-  register: kind_create
-  changed_when: kind_create.rc == 0
+    --wait 300s
+  when: kind_cluster_name not in kind_existing_clusters.stdout
+  register: kind_create_result
+  changed_when: kind_create_result.rc == 0
 
 - name: Export kubeconfig
   ansible.builtin.command: "kind export kubeconfig --name {{ kind_cluster_name }}"
   changed_when: false
 
 - name: Wait for all nodes to be Ready
-  kubernetes.core.k8s_info:
-    kind: Node
-    wait: true
-    wait_condition:
-      type: Ready
-      status: "True"
-    wait_timeout: 120
-  register: nodes
+  ansible.builtin.command: kubectl wait --for=condition=Ready node --all --timeout=120s
+  changed_when: false
 
-- name: Show node status
+- name: Show cluster nodes
+  ansible.builtin.command: kubectl get nodes
+  register: kind_nodes_output
+  changed_when: false
+
+- name: Display nodes
   ansible.builtin.debug:
-    msg: "Node {{ item.metadata.name }} is {{ item.status.conditions | selectattr('type','eq','Ready') | map(attribute='status') | first }}"
-  loop: "{{ nodes.resources }}"
+    msg: "{{ kind_nodes_output.stdout_lines }}"
 
-- name: Patch NGINX Ingress NodePort to 30080
-  kubernetes.core.k8s:
-    state: present
-    definition:
-      apiVersion: v1
-      kind: Service
-      metadata:
-        name: ingress-nginx-controller
-        namespace: ingress-nginx
-      spec:
-        ports:
-          - port: 80
-            nodePort: 30080
-            name: http
-          - port: 443
-            nodePort: 30443
-            name: https
-  ignore_errors: true
+- name: Install NGINX Ingress Controller
+  ansible.builtin.command: >
+    kubectl apply -f
+    https://raw.githubusercontent.com/kubernetes/ingress-nginx/main/deploy/static/provider/kind/deploy.yaml
+  changed_when: false
 
-- name: Label infra worker node
-  kubernetes.core.k8s:
-    state: present
-    definition:
-      apiVersion: v1
-      kind: Node
-      metadata:
-        name: "{{ kind_cluster_name }}-worker2"
-        labels:
-          workload: infra
-  ignore_errors: true
+- name: Wait for NGINX Ingress
+  ansible.builtin.command: >
+    kubectl wait --namespace ingress-nginx
+    --for=condition=ready pod
+    --selector=app.kubernetes.io/component=controller
+    --timeout=120s
+  changed_when: false
 
-- name: Label app worker node
-  kubernetes.core.k8s:
-    state: present
-    definition:
-      apiVersion: v1
-      kind: Node
-      metadata:
-        name: "{{ kind_cluster_name }}-worker"
-        labels:
-          workload: app
-  ignore_errors: true
+- name: Patch NGINX NodePort to 30080
+  ansible.builtin.command: >
+    kubectl patch svc ingress-nginx-controller -n ingress-nginx
+    --type=json
+    -p=[{"op":"replace","path":"/spec/ports/0/nodePort","value":30080},{"op":"replace","path":"/spec/ports/1/nodePort","value":30443}]
+  changed_when: false
+  failed_when: false
+
+- name: Install Metrics Server
+  ansible.builtin.command: >
+    kubectl apply -f
+    https://github.com/kubernetes-sigs/metrics-server/releases/latest/download/components.yaml
+  changed_when: false
+
+- name: Patch Metrics Server for KinD
+  ansible.builtin.command: >
+    kubectl patch deployment metrics-server -n kube-system
+    --type=json
+    -p=[{"op":"add","path":"/spec/template/spec/containers/0/args/-","value":"--kubelet-insecure-tls"}]
+  changed_when: false
+  failed_when: false

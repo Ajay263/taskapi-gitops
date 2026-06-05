@@ -1,11 +1,6 @@
 name: Infrastructure Deploy
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - 'taskapi-gitops/ansible/**'
-      - 'taskapi-gitops/infrastructure/**'
   workflow_dispatch:
     inputs:
       playbook:
@@ -21,34 +16,22 @@ on:
           - keycloak
           - security
           - verify
-      check_mode:
-        description: 'Dry run only?'
-        required: false
-        default: 'false'
-        type: choice
-        options:
-          - 'false'
-          - 'true'
 
 jobs:
   lint:
     name: "🔍 Ansible Lint"
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
     defaults:
       run:
         working-directory: taskapi-gitops/ansible
     steps:
       - uses: actions/checkout@v4
-
       - name: Install Ansible
-        run: pip install ansible ansible-lint --break-system-packages
-
+        run: pip install ansible ansible-lint
       - name: Install collections
         run: ansible-galaxy collection install kubernetes.core community.general
-
       - name: Write vault password
         run: echo "${{ secrets.ANSIBLE_VAULT_PASSWORD }}" > .vault_pass
-
       - name: Run ansible-lint
         env:
           ANSIBLE_VAULT_PASSWORD_FILE: .vault_pass
@@ -56,8 +39,8 @@ jobs:
         continue-on-error: true
 
   deploy:
-    name: "🚀 Run Ansible Playbook"
-    runs-on: self-hosted
+    name: "🚀 Deploy Full Infrastructure"
+    runs-on: ubuntu-latest
     needs: lint
     defaults:
       run:
@@ -66,67 +49,60 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install Python dependencies
-        run: pip install ansible jmespath kubernetes --break-system-packages
-
-      - name: Install Ansible collections
-        run: ansible-galaxy collection install kubernetes.core community.general
-
-      - name: Setup kubeconfig for runner
+      - name: Install system tools
         run: |
-          mkdir -p $HOME/.kube
-          # Export kubeconfig from KinD cluster
-          kind export kubeconfig --name taskapi-local
-          CONTROL_PLANE_IP=$(docker inspect taskapi-local-control-plane --format='{{.NetworkSettings.Networks.kind.IPAddress}}')
-          sed -i "s|https://127.0.0.1:[0-9]*|https://${CONTROL_PLANE_IP}:6443|g" $HOME/.kube/config
-          echo "KUBECONFIG=$HOME/.kube/config" >> $GITHUB_ENV
-          kubectl cluster-info
-          # Verify connectivity
-          kubectl cluster-info
-          kubectl get nodes
+          # Python packages
+          pip install ansible jmespath kubernetes
+
+          # Ansible collections
+          ansible-galaxy collection install kubernetes.core community.general
+
+          # kubectl
+          curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
+          chmod +x kubectl && sudo mv kubectl /usr/local/bin/
+
+          # KinD
+          curl -Lo ./kind https://kind.sigs.k8s.io/dl/v0.20.0/kind-linux-amd64
+          chmod +x kind && sudo mv kind /usr/local/bin/
+
+          # Helm
+          curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+
+          # ArgoCD CLI
+          curl -sSL -o argocd https://github.com/argoproj/argo-cd/releases/latest/download/argocd-linux-amd64
+          chmod +x argocd && sudo mv argocd /usr/local/bin/
+
+          # Verify tools
+          kubectl version --client
+          kind version
+          helm version --short
+          argocd version --client
 
       - name: Write vault password
         run: echo "${{ secrets.ANSIBLE_VAULT_PASSWORD }}" > .vault_pass
-
-      - name: Select playbook
-        id: playbook
-        run: |
-          PLAYBOOK="${{ github.event.inputs.playbook || 'verify' }}"
-          echo "name=${PLAYBOOK}" >> $GITHUB_OUTPUT
-
-
-      - name: Debug kubeconfig and cluster access
-        run: |
-          echo "=== Kubeconfig server ==="
-          cat $HOME/.kube/config | grep server
-          echo "=== kubectl version ==="
-          kubectl version --client
-          echo "=== kubectl get raw /api ==="
-          kubectl get --raw /api || echo "FAILED"
-          echo "=== kubectl get nodes ==="
-          kubectl get nodes || echo "FAILED"
 
       - name: Run Ansible playbook
         env:
           GITOPS_PAT: ${{ secrets.GITOPS_PAT }}
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
           ANSIBLE_VAULT_PASSWORD_FILE: .vault_pass
-          KUBECONFIG: ${{ env.HOME }}/.kube/config
         run: |
-          CHECK_FLAG=""
-          if [ "${{ github.event.inputs.check_mode }}" = "true" ]; then
-            CHECK_FLAG="--check --diff"
-          fi
-          ansible-playbook playbooks/${{ steps.playbook.outputs.name }}.yaml \
+          ansible-playbook playbooks/${{ github.event.inputs.playbook }}.yaml \
             -e "ansible_python_interpreter=$(which python3)" \
-            $CHECK_FLAG -v
+            -v
+
+      - name: Show cluster status
+        if: always()
+        run: |
+          kubectl get nodes 2>/dev/null || echo "No cluster"
+          kubectl get pods -A 2>/dev/null | grep -v Running | grep -v Completed || echo "All pods running"
 
       - name: Notify Slack on success
         if: success()
         uses: slackapi/slack-github-action@v1.26.0
         with:
           payload: |
-            {"text": "✅ Ansible playbook *${{ steps.playbook.outputs.name }}* succeeded\nCommit: ${{ github.sha }}"}
+            {"text": "✅ Infrastructure *${{ github.event.inputs.playbook }}* succeeded on GitHub Actions\nRun: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"}
         env:
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
         continue-on-error: true
@@ -136,7 +112,7 @@ jobs:
         uses: slackapi/slack-github-action@v1.26.0
         with:
           payload: |
-            {"text": "❌ Ansible playbook *${{ steps.playbook.outputs.name }}* FAILED\nSee: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"}
+            {"text": "❌ Infrastructure *${{ github.event.inputs.playbook }}* FAILED\nSee: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"}
         env:
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
         continue-on-error: true

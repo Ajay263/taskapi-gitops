@@ -3,5 +3,20 @@
   hosts: localhost
   connection: local
   gather_facts: false
+  vars_files:
+    - ../group_vars/all.yaml
+    - ../group_vars/all.vault.yaml
+
+  pre_tasks:
+    - name: Create cluster if it does not exist
+      ansible.builtin.command: kind get clusters
+      register: verify_existing_clusters
+      changed_when: false
+
+    - name: Bootstrap cluster for verify
+      ansible.builtin.include_role:
+        name: ../roles/kind_cluster
+      when: cluster_name not in verify_existing_clusters.stdout
+
   roles:
     - role: ../roles/verify
