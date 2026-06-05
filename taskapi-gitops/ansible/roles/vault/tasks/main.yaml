@@ -9,137 +9,79 @@
 
 - name: Create vault namespace
   ansible.builtin.command: kubectl create namespace vault
-  register: vault_ns
-  changed_when: vault_ns.rc == 0
-  failed_when: vault_ns.rc != 0 and "already exists" not in vault_ns.stderr
+  register: vault_create_ns
+  changed_when: vault_create_ns.rc == 0
+  failed_when: vault_create_ns.rc != 0 and "already exists" not in vault_create_ns.stderr
 
 - name: Install Vault via Helm
-  ansible.builtin.command: >
+  ansible.builtin.shell: >
     helm upgrade --install vault hashicorp/vault
     --namespace vault
     --set server.dev.enabled=true
     --set server.dev.devRootToken=root
-    --set server.nodeSelector."workload"=infra
+    --set injector.enabled=false
     --set server.resources.requests.memory=128Mi
     --set server.resources.requests.cpu=100m
     --set server.resources.limits.memory=256Mi
     --set server.resources.limits.cpu=200m
-    --set injector.enabled=false
     --wait
     --timeout 120s
-  register: vault_install
-  changed_when: vault_install.rc == 0
+  register: vault_helm_install
+  changed_when: "'UPGRADE' in vault_helm_install.stdout or 'INSTALL' in vault_helm_install.stdout"
 
 - name: Wait for Vault pod to be ready
   ansible.builtin.command: >
     kubectl wait --for=condition=ready pod
     -l app.kubernetes.io/name=vault
-    -n vault
-    --timeout=120s
+    -n vault --timeout=120s
+  register: vault_wait_pod
   changed_when: false
+  until: vault_wait_pod.rc == 0
+  retries: 3
+  delay: 10
 
-- name: Start port-forward to Vault
-  ansible.builtin.shell: |
-    pkill -f "port-forward.*vault.*8200" 2>/dev/null || true
-    kubectl port-forward -n vault svc/vault 8200:8200 &
-    sleep 8
+- name: Verify Vault is working
+  ansible.builtin.command: kubectl exec -n vault vault-0 -- vault status
+  register: vault_status
   changed_when: false
+  until: vault_status.rc == 0
+  retries: 30
+  delay: 10
 
-- name: Enable Kubernetes auth method
-  ansible.builtin.uri:
-    url: "http://127.0.0.1:8200/v1/sys/auth/kubernetes"
-    method: POST
-    headers:
-      X-Vault-Token: "root"
-    body_format: json
-    body:
-      type: kubernetes
-    status_code: [200, 204, 400]
-  register: vault_auth
-  changed_when: vault_auth.status in [200, 204]
-
-- name: Configure Kubernetes auth
-  ansible.builtin.uri:
-    url: "http://127.0.0.1:8200/v1/auth/kubernetes/config"
-    method: POST
-    headers:
-      X-Vault-Token: "root"
-    body_format: json
-    body:
-      kubernetes_host: "https://kubernetes.default.svc.cluster.local:443"
-    status_code: [200, 204]
-
-- name: Write Vault policies
-  ansible.builtin.uri:
-    url: "http://127.0.0.1:8200/v1/sys/policies/acl/{{ item.name }}"
-    method: PUT
-    headers:
-      X-Vault-Token: "root"
-    body_format: json
-    body:
-      policy: "{{ item.policy }}"
-    status_code: [200, 204]
-  loop:
-    - name: taskapi-dev
-      policy: |
-        path "secret/data/taskapi/dev" { capabilities = ["read"] }
-        path "secret/metadata/taskapi/dev" { capabilities = ["read", "list"] }
-    - name: taskapi-staging
-      policy: |
-        path "secret/data/taskapi/staging" { capabilities = ["read"] }
-        path "secret/metadata/taskapi/staging" { capabilities = ["read", "list"] }
-    - name: taskapi-prod
-      policy: |
-        path "secret/data/taskapi/prod" { capabilities = ["read"] }
-        path "secret/metadata/taskapi/prod" { capabilities = ["read", "list"] }
-
-- name: Write application secrets
-  ansible.builtin.uri:
-    url: "http://127.0.0.1:8200/v1/secret/data/taskapi/{{ item }}"
-    method: POST
-    headers:
-      X-Vault-Token: "root"
-    body_format: json
-    body:
-      data:
-        db-password: "{{ item }}-password-{{ 999999 | random }}"
-        api-key: "{{ item }}-apikey-{{ 999999 | random }}"
-    status_code: [200, 204]
-  loop:
-    - dev
-    - staging
-    - prod
-
-- name: Create Kubernetes auth roles
-  ansible.builtin.uri:
-    url: "http://127.0.0.1:8200/v1/auth/kubernetes/role/taskapi-{{ item.env }}"
-    method: POST
-    headers:
-      X-Vault-Token: "root"
-    body_format: json
-    body:
-      bound_service_account_names: taskapi
-      bound_service_account_namespaces: "taskapi-{{ item.env }}"
-      policies: "taskapi-{{ item.env }}"
-      ttl: "{{ item.ttl }}"
-    status_code: [200, 204]
-  loop:
-    - env: dev
-      ttl: 24h
-    - env: staging
-      ttl: 1h
-    - env: prod
-      ttl: 1h
-
-- name: Verify Vault is configured
-  ansible.builtin.uri:
-    url: "http://127.0.0.1:8200/v1/auth/kubernetes/role/taskapi-dev"
-    method: GET
-    headers:
-      X-Vault-Token: "root"
-    status_code: 200
-  register: vault_verify
-
-- name: Show Vault status
+- name: Display Vault status
   ansible.builtin.debug:
-    msg: "✅ Vault configured — role taskapi-dev bound to taskapi-dev namespace"
+    msg: "{{ vault_status.stdout_lines }}"
+
+- name: Configure Vault Kubernetes auth
+  ansible.builtin.shell: |
+    kubectl port-forward -n vault svc/vault 8200:8200 &
+    PF_PID=$!
+    sleep 5
+    export VAULT_ADDR=http://127.0.0.1:8200
+    export VAULT_TOKEN=root
+    vault auth enable kubernetes 2>/dev/null || true
+    vault write auth/kubernetes/config kubernetes_host="https://kubernetes.default.svc.cluster.local:443"
+    vault policy write taskapi-dev - <<EOF
+    path "secret/data/taskapi/dev" { capabilities = ["read"] }
+    path "secret/metadata/taskapi/dev" { capabilities = ["read", "list"] }
+    EOF
+    vault policy write taskapi-staging - <<EOF
+    path "secret/data/taskapi/staging" { capabilities = ["read"] }
+    EOF
+    vault policy write taskapi-prod - <<EOF
+    path "secret/data/taskapi/prod" { capabilities = ["read"] }
+    EOF
+    vault kv put secret/taskapi/dev db-password="dev-$(openssl rand -hex 8)" api-key="dev-api-$(openssl rand -hex 12)"
+    vault kv put secret/taskapi/staging db-password="staging-$(openssl rand -hex 8)" api-key="staging-api-$(openssl rand -hex 12)"
+    vault kv put secret/taskapi/prod db-password="prod-$(openssl rand -hex 8)" api-key="prod-api-$(openssl rand -hex 12)"
+    vault write auth/kubernetes/role/taskapi-dev bound_service_account_names=taskapi bound_service_account_namespaces=taskapi-dev policies=taskapi-dev ttl=24h
+    vault write auth/kubernetes/role/taskapi-staging bound_service_account_names=taskapi bound_service_account_namespaces=taskapi-staging policies=taskapi-staging ttl=1h
+    vault write auth/kubernetes/role/taskapi-prod bound_service_account_names=taskapi bound_service_account_namespaces=taskapi-prod policies=taskapi-prod ttl=1h
+    kill $PF_PID 2>/dev/null || true
+  changed_when: true
+  environment:
+    HOME: "{{ ansible_env.HOME }}"
+
+- name: Show Vault configuration complete
+  ansible.builtin.debug:
+    msg: "✅ Vault installed and configured with dev/staging/prod secrets"
