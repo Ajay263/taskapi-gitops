@@ -94,6 +94,18 @@ jobs:
           PLAYBOOK="${{ github.event.inputs.playbook || 'verify' }}"
           echo "name=${PLAYBOOK}" >> $GITHUB_OUTPUT
 
+
+      - name: Debug kubeconfig and cluster access
+        run: |
+          echo "=== Kubeconfig server ==="
+          cat $HOME/.kube/config | grep server
+          echo "=== kubectl version ==="
+          kubectl version --client
+          echo "=== kubectl get raw /api ==="
+          kubectl get --raw /api || echo "FAILED"
+          echo "=== kubectl get nodes ==="
+          kubectl get nodes || echo "FAILED"
+
       - name: Run Ansible playbook
         env:
           GITOPS_PAT: ${{ secrets.GITOPS_PAT }}
