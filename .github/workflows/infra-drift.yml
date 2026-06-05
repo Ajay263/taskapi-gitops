@@ -25,6 +25,10 @@ jobs:
         run: |
           mkdir -p $HOME/.kube
           kind export kubeconfig --name taskapi-local
+          CONTROL_PLANE_IP=$(docker inspect taskapi-local-control-plane --format='{{.NetworkSettings.Networks.kind.IPAddress}}')
+          sed -i "s|https://127.0.0.1:[0-9]*|https://${CONTROL_PLANE_IP}:6443|g" $HOME/.kube/config
+          echo "KUBECONFIG=$HOME/.kube/config" >> $GITHUB_ENV
+          kubectl cluster-info
           echo "KUBECONFIG=$HOME/.kube/config" >> $GITHUB_ENV --kubeconfig $HOME/.kube/config
           kubectl cluster-info
 
