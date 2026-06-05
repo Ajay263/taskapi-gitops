@@ -1,83 +1,90 @@
 ---
 - name: Verify cluster is reachable
-  kubernetes.core.k8s_info:
-    kind: Node
-  register: nodes
-  failed_when: nodes.resources | length == 0
+  ansible.builtin.command: kubectl cluster-info
+  register: verify_cluster
+  changed_when: false
+  failed_when: verify_cluster.rc != 0
 
-- name: Verify all nodes are Ready
-  assert:
-    that: >
-      item.status.conditions |
-      selectattr('type','eq','Ready') |
-      map(attribute='status') | first == 'True'
-    fail_msg: "Node {{ item.metadata.name }} is not Ready"
-  loop: "{{ nodes.resources }}"
+- name: Get nodes
+  ansible.builtin.command: kubectl get nodes --no-headers
+  register: verify_nodes_raw
+  changed_when: false
+
+- name: Verify all nodes Ready
+  ansible.builtin.assert:
+    that: "'NotReady' not in verify_nodes_raw.stdout"
+    fail_msg: "Some nodes are not Ready"
 
 - name: Verify taskapi pod is running
-  kubernetes.core.k8s_info:
-    kind: Pod
-    namespace: taskapi-dev
-    label_selectors:
-      - app=taskapi
-  register: taskapi_pods
-  failed_when: taskapi_pods.resources | length == 0
+  ansible.builtin.command: >
+    kubectl get pods -n taskapi-dev -l app=taskapi --no-headers
+  register: verify_taskapi_pods
+  changed_when: false
+  failed_when: verify_taskapi_pods.stdout == ''
 
-- name: Verify taskapi health endpoint
-  ansible.builtin.uri:
-    url: http://localhost:8080/api/health
-    status_code: 200
-  register: health
-  retries: 5
-  delay: 10
+- name: Verify taskapi health via kubectl exec
+  ansible.builtin.command: >
+    kubectl exec -n taskapi-dev deploy/taskapi
+    -- wget -q -O- http://localhost:8000/health
+  register: verify_health_raw
+  changed_when: false
+  retries: 3
+  delay: 5
 
-- name: Assert vault_secret is ok
-  assert:
-    that: health.json.checks.vault_secret == 'ok'
-    fail_msg: "Vault secret not injected — run vault playbook"
+- name: Parse health response
+  ansible.builtin.set_fact:
+    verify_health: "{{ verify_health_raw.stdout | from_json }}"
+
+- name: Assert app is healthy
+  ansible.builtin.assert:
+    that: verify_health.status == 'healthy'
+    fail_msg: "App health check failed: {{ verify_health }}"
+
+- name: Assert vault secret is injected
+  ansible.builtin.assert:
+    that: verify_health.checks.vault_secret == 'ok'
+    fail_msg: "Vault secret not injected — run vault recovery"
 
 - name: Verify Prometheus is running
-  kubernetes.core.k8s_info:
-    kind: Pod
-    namespace: monitoring
-    label_selectors:
-      - app.kubernetes.io/name=prometheus
-  register: prom_pods
-  failed_when: prom_pods.resources | length == 0
+  ansible.builtin.command: >
+    kubectl get pods -n monitoring
+    -l app.kubernetes.io/name=prometheus --no-headers
+  register: verify_prom
+  changed_when: false
+  failed_when: verify_prom.stdout == ''
 
 - name: Verify Grafana is running
-  kubernetes.core.k8s_info:
-    kind: Pod
-    namespace: monitoring
-    label_selectors:
-      - app.kubernetes.io/name=grafana
-  register: grafana_pods
-  failed_when: grafana_pods.resources | length == 0
+  ansible.builtin.command: >
+    kubectl get pods -n monitoring
+    -l app.kubernetes.io/name=grafana --no-headers
+  register: verify_grafana
+  changed_when: false
+  failed_when: verify_grafana.stdout == ''
 
 - name: Verify ArgoCD is running
-  kubernetes.core.k8s_info:
-    kind: Pod
-    namespace: argocd
-    label_selectors:
-      - app.kubernetes.io/name=argocd-server
-  register: argocd_pods
-  failed_when: argocd_pods.resources | length == 0
+  ansible.builtin.command: >
+    kubectl get pods -n argocd
+    -l app.kubernetes.io/name=argocd-server --no-headers
+  register: verify_argocd
+  changed_when: false
+  failed_when: verify_argocd.stdout == ''
 
 - name: Verify OPA Gatekeeper constraint exists
-  kubernetes.core.k8s_info:
-    api_version: constraints.gatekeeper.sh/v1beta1
-    kind: RequireNonRoot
-    name: require-non-root
-  register: constraint
+  ansible.builtin.command: >
+    kubectl get requirenonroot require-non-root
+  register: verify_constraint
+  changed_when: false
+  failed_when: false
 
 - name: Print verification summary
   ansible.builtin.debug:
     msg:
-      - "✅ Cluster: {{ nodes.resources | length }} nodes Ready"
-      - "✅ TaskAPI: {{ taskapi_pods.resources | length }} pod(s) running"
-      - "✅ Health: {{ health.json.status }}"
-      - "✅ Vault secret: {{ health.json.checks.vault_secret }}"
-      - "✅ Prometheus: {{ prom_pods.resources | length }} pod(s)"
-      - "✅ Grafana: {{ grafana_pods.resources | length }} pod(s)"
-      - "✅ ArgoCD: {{ argocd_pods.resources | length }} pod(s)"
-      - "✅ OPA constraint: {{ 'active' if constraint.resources else 'missing' }}"
+      - "✅ Cluster: reachable"
+      - "✅ Nodes: {{ verify_nodes_raw.stdout_lines | length }} ready"
+      - "✅ TaskAPI: running"
+      - "✅ Health: {{ verify_health.status }}"
+      - "✅ Vault secret: {{ verify_health.checks.vault_secret }}"
+      - "✅ Prometheus: running"
+      - "✅ Grafana: running"
+      - "✅ ArgoCD: running"
+      - "✅ OPA: {{ 'active' if verify_constraint.rc == 0 else 'missing' }}"

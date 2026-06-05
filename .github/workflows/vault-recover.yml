@@ -27,7 +27,8 @@ jobs:
       - name: Setup kubeconfig
         run: |
           mkdir -p $HOME/.kube
-          kind export kubeconfig --name taskapi-local --kubeconfig $HOME/.kube/config
+          kind export kubeconfig --name taskapi-local
+          echo "KUBECONFIG=$HOME/.kube/config" >> $GITHUB_ENV --kubeconfig $HOME/.kube/config
           kubectl cluster-info
 
       - name: Write vault password

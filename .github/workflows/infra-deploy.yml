@@ -76,7 +76,8 @@ jobs:
         run: |
           mkdir -p $HOME/.kube
           # Export kubeconfig from KinD cluster
-          kind export kubeconfig --name taskapi-local --kubeconfig $HOME/.kube/config
+          kind export kubeconfig --name taskapi-local
+          echo "KUBECONFIG=$HOME/.kube/config" >> $GITHUB_ENV --kubeconfig $HOME/.kube/config
           # Verify connectivity
           kubectl cluster-info
           kubectl get nodes
