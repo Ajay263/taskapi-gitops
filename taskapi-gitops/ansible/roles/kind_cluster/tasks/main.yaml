@@ -9,14 +9,14 @@
     src: kind-config.yaml.j2
     dest: /tmp/kind-config.yaml
     mode: "0644"
-  when: kind_cluster_name not in kind_existing_clusters.stdout
+  when: kind_existing_clusters.stdout == "" or kind_cluster_name not in kind_existing_clusters.stdout
 
 - name: Create KinD cluster
   ansible.builtin.command: >
     kind create cluster
     --config /tmp/kind-config.yaml
     --wait 300s
-  when: kind_cluster_name not in kind_existing_clusters.stdout
+  when: kind_existing_clusters.stdout == "" or kind_cluster_name not in kind_existing_clusters.stdout
   register: kind_create_result
   changed_when: kind_create_result.rc == 0
 

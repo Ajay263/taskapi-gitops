@@ -19,7 +19,7 @@
     - name: Bootstrap cluster if missing
       ansible.builtin.include_role:
         name: ../roles/kind_cluster
-      when: kind_cluster_name not in verify_existing_clusters.stdout
+      when: verify_existing_clusters.stdout == "" or kind_cluster_name not in verify_existing_clusters.stdout
 
   roles:
     - role: ../roles/verify
