@@ -49,33 +49,32 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install system tools
+      - name: Install Python packages and Ansible
         run: |
-          # Python packages
           pip install ansible jmespath kubernetes
-
-          # Ansible collections
           ansible-galaxy collection install kubernetes.core community.general
 
-          # kubectl
+      - name: Install kubectl
+        run: |
           curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
           chmod +x kubectl && sudo mv kubectl /usr/local/bin/
+          kubectl version --client
 
-          # KinD
+      - name: Install KinD
+        run: |
           curl -Lo ./kind https://kind.sigs.k8s.io/dl/v0.20.0/kind-linux-amd64
           chmod +x kind && sudo mv kind /usr/local/bin/
+          kind version
 
-          # Helm
-          curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+      - name: Install Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: latest
 
-          # ArgoCD CLI
+      - name: Install ArgoCD CLI
+        run: |
           curl -sSL -o argocd https://github.com/argoproj/argo-cd/releases/latest/download/argocd-linux-amd64
           chmod +x argocd && sudo mv argocd /usr/local/bin/
-
-          # Verify tools
-          kubectl version --client
-          kind version
-          helm version --short
           argocd version --client
 
       - name: Write vault password
