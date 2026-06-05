@@ -88,7 +88,13 @@ spec:
               value: "INFO"   # Phase 9: DEBUG in dev, WARNING in prod
 
             - name: OTEL_EXPORTER_OTLP_ENDPOINT
-              value: "http://jaeger-collector.observability.svc.cluster.local:4317"
+              value: "http://otel-collector.monitoring.svc.cluster.local:4317"
+
+            - name: OTEL_SERVICE_NAME
+              value: "taskapi"
+
+            - name: OTEL_RESOURCE_ATTRIBUTES
+              value: "deployment.environment=$(ENVIRONMENT),service.version=$(APP_VERSION)"
 
      # DB_PASSWORD: Phase 7 replaces this with a Vault-sourced secret.
             # For Phase 6 only, we set a placeholder so the pod starts without Vault.

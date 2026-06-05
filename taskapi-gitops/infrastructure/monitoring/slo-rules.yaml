@@ -1,0 +1,58 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: taskapi-slos
+  namespace: monitoring
+  labels:
+    release: kube-prometheus-stack
+spec:
+  groups:
+    - name: taskapi.slo.recording
+      rules:
+        # Availability SLI: fraction of non-5xx requests
+        - record: taskapi:availability_sli:ratio_rate5m
+          expr: |
+            sum(rate(taskapi_requests_total{http_status!~"5.."}[5m]))
+              by (namespace)
+            /
+            sum(rate(taskapi_requests_total[5m]))
+              by (namespace)
+
+        # Latency SLI: p95 response time
+        - record: taskapi:p95_latency_sli:rate5m
+          expr: |
+            histogram_quantile(0.95,
+              sum(rate(taskapi_request_duration_seconds_bucket[5m]))
+                by (le, namespace)
+            )
+
+    - name: taskapi.slo.alerts
+      rules:
+        # Fast burn: will exhaust monthly error budget in hours
+        - alert: TaskAPIAvailabilityFastBurn
+          expr: taskapi:availability_sli:ratio_rate5m < (1 - 14.4 * 0.001)
+          for: 2m
+          labels:
+            severity: critical
+            slo: availability
+          annotations:
+            summary: "TaskAPI burning error budget rapidly in {{ $labels.namespace }}"
+
+        # Slow burn: will exhaust budget in ~1 day
+        - alert: TaskAPIAvailabilitySlowBurn
+          expr: taskapi:availability_sli:ratio_rate5m < (1 - 6 * 0.001)
+          for: 15m
+          labels:
+            severity: warning
+            slo: availability
+          annotations:
+            summary: "TaskAPI slowly consuming error budget in {{ $labels.namespace }}"
+
+        - alert: TaskAPILatencySLOBreach
+          expr: taskapi:p95_latency_sli:rate5m > 0.2
+          for: 10m
+          labels:
+            severity: warning
+            slo: latency
+          annotations:
+            summary: "TaskAPI p95 latency exceeds 200ms SLO"

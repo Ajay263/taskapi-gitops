@@ -10,14 +10,17 @@ spec:
     - name: taskapi.availability
       interval: 30s
       rules:
+
         - alert: TaskAPIDown
           expr: up{job="taskapi"} == 0
           for: 1m
           labels:
             severity: critical
+            namespace: "{{ $labels.namespace }}"
           annotations:
-            summary: "TaskAPI is DOWN in {{ $labels.namespace }}"
-            description: "Check: kubectl get pods -n {{ $labels.namespace }}"
+            summary: "🔴 TaskAPI is DOWN in {{ $labels.namespace }}"
+            description: "TaskAPI has been unreachable for 1+ minute. Immediate action required."
+            runbook_url: "https://github.com/Ajay263/taskapi-gitops/blob/main/docs/runbooks/taskapi-down.md"
 
         - alert: TaskAPIHighErrorRate
           expr: |
@@ -30,7 +33,8 @@ spec:
           labels:
             severity: warning
           annotations:
-            summary: "Error rate > 5% in {{ $labels.namespace }}"
+            summary: "⚠️ High error rate in {{ $labels.namespace }}"
+            description: "Error rate is {{ $value | humanizePercentage }} over the last 5 minutes."
 
         - alert: TaskAPISlowResponses
           expr: |
@@ -42,7 +46,8 @@ spec:
           labels:
             severity: warning
           annotations:
-            summary: "p95 latency > 500ms in {{ $labels.namespace }}"
+            summary: "⚠️ p95 latency > 500ms in {{ $labels.namespace }}"
+            description: "95th percentile latency is {{ $value | humanizeDuration }}. SLO breach imminent."
 
         - alert: TaskAPIPodsNotReady
           expr: |
@@ -52,4 +57,16 @@ spec:
           labels:
             severity: warning
           annotations:
-            summary: "taskapi has fewer ready pods than desired"
+            summary: "⚠️ TaskAPI pods degraded in {{ $labels.namespace }}"
+            description: "{{ $value }} pods ready, expected more. Check pod events."
+
+        - alert: TaskAPIMemoryNearLimit
+          expr: |
+            container_memory_working_set_bytes{container="taskapi"}
+            / container_spec_memory_limit_bytes{container="taskapi"} > 0.85
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "⚠️ TaskAPI memory above 85% in {{ $labels.namespace }}"
+            description: "Memory usage is {{ $value | humanizePercentage }} of limit. Risk of OOMKill."
