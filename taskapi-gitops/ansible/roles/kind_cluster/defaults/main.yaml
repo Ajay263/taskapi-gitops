@@ -1,4 +1,5 @@
 ---
-kind_cluster_name: "{{ cluster_name | default('taskapi-local') }}"
+kind_cluster_name: "taskapi-local"
+cluster_name: "taskapi-local"
 kind_node_image: "kindest/node:v1.27.3"
 kind_wait_timeout: "300s"

@@ -89,6 +89,8 @@ jobs:
         run: |
           ansible-playbook playbooks/${{ github.event.inputs.playbook }}.yaml \
             -e "ansible_python_interpreter=$(which python3)" \
+            -e "kind_cluster_name=taskapi-local" \
+            -e "cluster_name=taskapi-local" \
             -v
 
       - name: Show cluster status
