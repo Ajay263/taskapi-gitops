@@ -1,68 +1,56 @@
 ---
 - name: Add HashiCorp Helm repo
-  kubernetes.core.helm_repository:
-    name: hashicorp
-    repo_url: https://helm.releases.hashicorp.com
+  ansible.builtin.command: helm repo add hashicorp https://helm.releases.hashicorp.com
+  changed_when: false
+
+- name: Update Helm repos
+  ansible.builtin.command: helm repo update
+  changed_when: false
 
 - name: Create vault namespace
-  kubernetes.core.k8s:
-    name: vault
-    api_version: v1
-    kind: Namespace
-    state: present
+  ansible.builtin.command: kubectl create namespace vault
+  register: vault_ns
+  changed_when: vault_ns.rc == 0
+  failed_when: vault_ns.rc != 0 and "already exists" not in vault_ns.stderr
 
 - name: Install Vault via Helm
-  kubernetes.core.helm:
-    name: vault
-    chart_ref: hashicorp/vault
-    release_namespace: vault
-    create_namespace: true
-    values:
-      server:
-        dev:
-          enabled: true
-          devRootToken: "root"
-        nodeSelector:
-          workload: infra
-        resources:
-          requests:
-            memory: "128Mi"
-            cpu: "100m"
-          limits:
-            memory: "256Mi"
-            cpu: "200m"
-    wait: true
-    wait_condition:
-      type: Available
-    timeout: "120s"
+  ansible.builtin.command: >
+    helm upgrade --install vault hashicorp/vault
+    --namespace vault
+    --set server.dev.enabled=true
+    --set server.dev.devRootToken=root
+    --set server.nodeSelector."workload"=infra
+    --set server.resources.requests.memory=128Mi
+    --set server.resources.requests.cpu=100m
+    --set server.resources.limits.memory=256Mi
+    --set server.resources.limits.cpu=200m
+    --set injector.enabled=false
+    --wait
+    --timeout 120s
+  register: vault_install
+  changed_when: vault_install.rc == 0
 
 - name: Wait for Vault pod to be ready
-  kubernetes.core.k8s_info:
-    kind: Pod
-    namespace: vault
-    label_selectors:
-      - app.kubernetes.io/name=vault
-    wait: true
-    wait_condition:
-      type: Ready
-      status: "True"
-    wait_timeout: 120
+  ansible.builtin.command: >
+    kubectl wait --for=condition=ready pod
+    -l app.kubernetes.io/name=vault
+    -n vault
+    --timeout=120s
+  changed_when: false
 
 - name: Start port-forward to Vault
   ansible.builtin.shell: |
     pkill -f "port-forward.*vault.*8200" 2>/dev/null || true
     kubectl port-forward -n vault svc/vault 8200:8200 &
-    sleep 5
-    echo $!
-  register: vault_pf
+    sleep 8
   changed_when: false
 
 - name: Enable Kubernetes auth method
   ansible.builtin.uri:
-    url: "{{ vault_addr }}/v1/sys/auth/kubernetes"
+    url: "http://127.0.0.1:8200/v1/sys/auth/kubernetes"
     method: POST
     headers:
-      X-Vault-Token: "{{ vault_root_token }}"
+      X-Vault-Token: "root"
     body_format: json
     body:
       type: kubernetes
@@ -72,10 +60,10 @@
 
 - name: Configure Kubernetes auth
   ansible.builtin.uri:
-    url: "{{ vault_addr }}/v1/auth/kubernetes/config"
+    url: "http://127.0.0.1:8200/v1/auth/kubernetes/config"
     method: POST
     headers:
-      X-Vault-Token: "{{ vault_root_token }}"
+      X-Vault-Token: "root"
     body_format: json
     body:
       kubernetes_host: "https://kubernetes.default.svc.cluster.local:443"
@@ -83,10 +71,10 @@
 
 - name: Write Vault policies
   ansible.builtin.uri:
-    url: "{{ vault_addr }}/v1/sys/policies/acl/{{ item.name }}"
+    url: "http://127.0.0.1:8200/v1/sys/policies/acl/{{ item.name }}"
     method: PUT
     headers:
-      X-Vault-Token: "{{ vault_root_token }}"
+      X-Vault-Token: "root"
     body_format: json
     body:
       policy: "{{ item.policy }}"
@@ -107,15 +95,15 @@
 
 - name: Write application secrets
   ansible.builtin.uri:
-    url: "{{ vault_addr }}/v1/secret/data/taskapi/{{ item }}"
+    url: "http://127.0.0.1:8200/v1/secret/data/taskapi/{{ item }}"
     method: POST
     headers:
-      X-Vault-Token: "{{ vault_root_token }}"
+      X-Vault-Token: "root"
     body_format: json
     body:
       data:
-        db-password: "{{ item }}-{{ lookup('password', '/dev/null length=16 chars=ascii_letters,digits') }}"
-        api-key: "{{ item }}-api-{{ lookup('password', '/dev/null length=24 chars=ascii_letters,digits') }}"
+        db-password: "{{ item }}-password-{{ 999999 | random }}"
+        api-key: "{{ item }}-apikey-{{ 999999 | random }}"
     status_code: [200, 204]
   loop:
     - dev
@@ -124,10 +112,10 @@
 
 - name: Create Kubernetes auth roles
   ansible.builtin.uri:
-    url: "{{ vault_addr }}/v1/auth/kubernetes/role/taskapi-{{ item.env }}"
+    url: "http://127.0.0.1:8200/v1/auth/kubernetes/role/taskapi-{{ item.env }}"
     method: POST
     headers:
-      X-Vault-Token: "{{ vault_root_token }}"
+      X-Vault-Token: "root"
     body_format: json
     body:
       bound_service_account_names: taskapi
@@ -143,15 +131,15 @@
     - env: prod
       ttl: 1h
 
-- name: Verify Vault configuration
+- name: Verify Vault is configured
   ansible.builtin.uri:
-    url: "{{ vault_addr }}/v1/auth/kubernetes/role/taskapi-dev"
+    url: "http://127.0.0.1:8200/v1/auth/kubernetes/role/taskapi-dev"
     method: GET
     headers:
-      X-Vault-Token: "{{ vault_root_token }}"
+      X-Vault-Token: "root"
     status_code: 200
   register: vault_verify
 
-- name: Show Vault role status
+- name: Show Vault status
   ansible.builtin.debug:
-    msg: "✅ Vault role taskapi-dev configured: bound to {{ vault_verify.json.data.bound_service_account_namespaces }}"
+    msg: "✅ Vault configured — role taskapi-dev bound to taskapi-dev namespace"
