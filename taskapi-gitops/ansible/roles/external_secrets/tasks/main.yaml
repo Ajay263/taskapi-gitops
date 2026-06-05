@@ -1,0 +1,38 @@
+---
+- name: Add External Secrets Helm repo
+  ansible.builtin.command: >
+    helm repo add external-secrets https://charts.external-secrets.io
+  changed_when: false
+
+- name: Update Helm repos
+  ansible.builtin.command: helm repo update
+  changed_when: false
+
+- name: Install External Secrets Operator
+  ansible.builtin.command: >
+    helm upgrade --install external-secrets
+    external-secrets/external-secrets
+    --namespace external-secrets
+    --create-namespace
+    --version 0.9.20
+    --set installCRDs=true
+    --wait
+    --timeout 120s
+  register: eso_install
+  changed_when: eso_install.rc == 0
+
+- name: Wait for ESO to be ready
+  ansible.builtin.command: >
+    kubectl wait --for=condition=available deployment/external-secrets
+    --namespace=external-secrets --timeout=120s
+  changed_when: false
+
+- name: Verify ESO is running
+  ansible.builtin.command: >
+    kubectl get pods -n external-secrets --no-headers
+  register: eso_pods
+  changed_when: false
+
+- name: Show ESO pods
+  ansible.builtin.debug:
+    msg: "{{ eso_pods.stdout_lines }}"
