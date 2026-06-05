@@ -18,7 +18,7 @@ patches:
 images:
 - name: ghcr.io/ajay263/taskapi
   newName: ghcr.io/ajay263/taskapi
-  newTag: sha-c990252
+  newTag: sha-3ab00e2
 - name: taskapi
   newName: ghcr.io/ajay263/taskapi
   newTag: sha-2bba0a2
