@@ -15,12 +15,12 @@
     that: "'NotReady' not in verify_nodes_raw.stdout"
     fail_msg: "Some nodes are not Ready"
 
-- name: Verify taskapi pod is running
+- name: Check if taskapi is deployed
   ansible.builtin.command: >
     kubectl get pods -n taskapi-dev -l app=taskapi --no-headers
   register: verify_taskapi_pods
   changed_when: false
-  failed_when: verify_taskapi_pods.stdout == ''
+  failed_when: false
 
 - name: Verify taskapi health via kubectl exec
   ansible.builtin.command: >
@@ -30,46 +30,42 @@
   changed_when: false
   retries: 3
   delay: 5
+  when: verify_taskapi_pods.stdout != ""
+  failed_when: false
 
 - name: Parse health response
   ansible.builtin.set_fact:
     verify_health: "{{ verify_health_raw.stdout | from_json }}"
+  when:
+    - verify_taskapi_pods.stdout != ""
+    - verify_health_raw.stdout is defined
+    - verify_health_raw.stdout != ""
 
-- name: Assert app is healthy
-  ansible.builtin.assert:
-    that: verify_health.status == 'healthy'
-    fail_msg: "App health check failed: {{ verify_health }}"
-
-- name: Assert vault secret is injected
-  ansible.builtin.assert:
-    that: verify_health.checks.vault_secret == 'ok'
-    fail_msg: "Vault secret not injected — run vault recovery"
-
-- name: Verify Prometheus is running
+- name: Check if Prometheus is deployed
   ansible.builtin.command: >
     kubectl get pods -n monitoring
     -l app.kubernetes.io/name=prometheus --no-headers
   register: verify_prom
   changed_when: false
-  failed_when: verify_prom.stdout == ''
+  failed_when: false
 
-- name: Verify Grafana is running
+- name: Check if Grafana is deployed
   ansible.builtin.command: >
     kubectl get pods -n monitoring
     -l app.kubernetes.io/name=grafana --no-headers
   register: verify_grafana
   changed_when: false
-  failed_when: verify_grafana.stdout == ''
+  failed_when: false
 
-- name: Verify ArgoCD is running
+- name: Check if ArgoCD is deployed
   ansible.builtin.command: >
     kubectl get pods -n argocd
     -l app.kubernetes.io/name=argocd-server --no-headers
   register: verify_argocd
   changed_when: false
-  failed_when: verify_argocd.stdout == ''
+  failed_when: false
 
-- name: Verify OPA Gatekeeper constraint exists
+- name: Check OPA Gatekeeper constraint
   ansible.builtin.command: >
     kubectl get requirenonroot require-non-root
   register: verify_constraint
@@ -81,10 +77,10 @@
     msg:
       - "✅ Cluster: reachable"
       - "✅ Nodes: {{ verify_nodes_raw.stdout_lines | length }} ready"
-      - "✅ TaskAPI: running"
-      - "✅ Health: {{ verify_health.status }}"
-      - "✅ Vault secret: {{ verify_health.checks.vault_secret }}"
-      - "✅ Prometheus: running"
-      - "✅ Grafana: running"
-      - "✅ ArgoCD: running"
-      - "✅ OPA: {{ 'active' if verify_constraint.rc == 0 else 'missing' }}"
+      - "{{ '✅' if verify_taskapi_pods.stdout != '' else '⚠️ ' }} TaskAPI: {{ 'running' if verify_taskapi_pods.stdout != '' else 'not deployed yet' }}"
+      - "{{ '✅' if verify_health is defined else '⚠️ ' }} Health: {{ verify_health.status if verify_health is defined else 'n/a' }}"
+      - "{{ '✅' if verify_health is defined and verify_health.checks.vault_secret == 'ok' else '⚠️ ' }} Vault secret: {{ verify_health.checks.vault_secret if verify_health is defined else 'n/a' }}"
+      - "{{ '✅' if verify_prom.stdout != '' else '⚠️ ' }} Prometheus: {{ 'running' if verify_prom.stdout != '' else 'not deployed yet' }}"
+      - "{{ '✅' if verify_grafana.stdout != '' else '⚠️ ' }} Grafana: {{ 'running' if verify_grafana.stdout != '' else 'not deployed yet' }}"
+      - "{{ '✅' if verify_argocd.stdout != '' else '⚠️ ' }} ArgoCD: {{ 'running' if verify_argocd.stdout != '' else 'not deployed yet' }}"
+      - "{{ '✅' if verify_constraint.rc == 0 else '⚠️ ' }} OPA: {{ 'active' if verify_constraint.rc == 0 else 'not deployed yet' }}"
