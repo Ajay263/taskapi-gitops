@@ -1,19 +1,15 @@
-# ServiceMonitor is a Custom Resource from the kube-prometheus-stack.
-# It tells Prometheus: "Find Services labelled 'app: taskapi' in these namespaces
-# and scrape their /metrics endpoint every 15 seconds."
+# ServiceMonitor tells Prometheus: find Services labelled 'app: taskapi'
+# in these namespaces and scrape /metrics every 15 seconds.
 #
-# Prometheus discovers ServiceMonitors automatically — no Prometheus config editing.
-# This is the Kubernetes-native way to add scrape targets.
-#
-# Note: The 'release: kube-prometheus-stack' label MUST match the Helm release name.
-# Without it, Prometheus ignores this ServiceMonitor.
+# CRITICAL: the 'release: kube-prometheus-stack' label MUST match
+# the Helm release name exactly. Without it, Prometheus ignores this.
 apiVersion: monitoring.coreos.com/v1
 kind: ServiceMonitor
 metadata:
   name: taskapi
   namespace: monitoring
   labels:
-    release: kube-prometheus-stack   # ← Must match Helm release name
+    release: kube-prometheus-stack
     app: taskapi
 spec:
   namespaceSelector:
@@ -23,9 +19,9 @@ spec:
       - taskapi-prod
   selector:
     matchLabels:
-      app: taskapi   # Find Services with this label
+      app: taskapi
   endpoints:
-    - port: http      # The named port in base/service.yaml
+    - port: http
       path: /metrics
       interval: 15s
       scrapeTimeout: 10s

@@ -1,0 +1,38 @@
+deploymentMode: SingleBinary
+
+loki:
+  auth_enabled: false
+  commonConfig:
+    replication_factor: 1
+  storage:
+    type: filesystem
+  limits_config:
+    ingestion_rate_mb: 10
+  server:
+    http_listen_port: 3100
+  # Retention disabled — avoids compactor config requirement
+  compactor:
+    retention_enabled: false
+
+singleBinary:
+  replicas: 1
+  resources:
+    requests:
+      memory: "128Mi"
+      cpu: "100m"
+    limits:
+      memory: "256Mi"
+      cpu: "200m"
+  nodeSelector:
+    workload: infra
+
+read:
+  replicas: 0
+write:
+  replicas: 0
+backend:
+  replicas: 0
+
+service:
+  type: ClusterIP
+  port: 3100

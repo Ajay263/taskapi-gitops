@@ -1,34 +1,24 @@
-# PrometheusRule defines when to fire alerts.
-# Each rule is a PromQL expression that Prometheus evaluates every 30 seconds.
-# When the condition is true for the 'for' duration → alert fires.
-# Alertmanager then routes the alert to Slack, PagerDuty, email, etc.
 apiVersion: monitoring.coreos.com/v1
 kind: PrometheusRule
 metadata:
   name: taskapi-alerts
   namespace: monitoring
   labels:
-    release: kube-prometheus-stack   # Must match Helm release name
+    release: kube-prometheus-stack
 spec:
   groups:
     - name: taskapi.availability
       interval: 30s
       rules:
-
-        # Alert: App completely unreachable
         - alert: TaskAPIDown
           expr: up{job="taskapi"} == 0
-          for: 1m   # Must be down for 1 continuous minute before firing
+          for: 1m
           labels:
             severity: critical
           annotations:
             summary: "TaskAPI is DOWN in {{ $labels.namespace }}"
-            description: >
-              TaskAPI has been unreachable for 1+ minute.
-              First check: kubectl get pods -n {{ $labels.namespace }}
+            description: "Check: kubectl get pods -n {{ $labels.namespace }}"
 
-        # Alert: Error rate > 5% over 5 minutes
-        # Formula: (5xx requests / all requests) > 5%
         - alert: TaskAPIHighErrorRate
           expr: |
             (
@@ -40,11 +30,8 @@ spec:
           labels:
             severity: warning
           annotations:
-            summary: "High error rate in {{ $labels.namespace }}"
-            description: "Error rate is {{ $value | humanizePercentage }}"
+            summary: "Error rate > 5% in {{ $labels.namespace }}"
 
-        # Alert: p95 latency > 500ms
-        # histogram_quantile calculates the 95th percentile from histogram buckets
         - alert: TaskAPISlowResponses
           expr: |
             histogram_quantile(0.95,
@@ -55,9 +42,8 @@ spec:
           labels:
             severity: warning
           annotations:
-            summary: "Slow responses in {{ $labels.namespace }} (p95 > 500ms)"
+            summary: "p95 latency > 500ms in {{ $labels.namespace }}"
 
-        # Alert: Fewer pods running than desired
         - alert: TaskAPIPodsNotReady
           expr: |
             kube_deployment_status_replicas_ready{deployment="taskapi"}
