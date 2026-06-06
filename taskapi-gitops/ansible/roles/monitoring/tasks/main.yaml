@@ -1,112 +1,112 @@
 ---
 - name: Add Prometheus community Helm repo
-  kubernetes.core.helm_repository:
-    name: prometheus-community
-    repo_url: https://prometheus-community.github.io/helm-charts
+  ansible.builtin.command: helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+  changed_when: false
 
 - name: Add Grafana Helm repo
-  kubernetes.core.helm_repository:
-    name: grafana
-    repo_url: https://grafana.github.io/helm-charts
+  ansible.builtin.command: helm repo add grafana https://grafana.github.io/helm-charts
+  changed_when: false
+
+- name: Update Helm repos
+  ansible.builtin.command: helm repo update
+  changed_when: false
 
 - name: Create monitoring namespace
-  kubernetes.core.k8s:
-    name: monitoring
-    api_version: v1
-    kind: Namespace
-    state: present
+  ansible.builtin.command: kubectl create namespace monitoring
+  register: mon_ns
+  changed_when: mon_ns.rc == 0
+  failed_when: mon_ns.rc != 0 and "already exists" not in mon_ns.stderr
 
 - name: Install kube-prometheus-stack
-  kubernetes.core.helm:
-    name: kube-prometheus-stack
-    chart_ref: prometheus-community/kube-prometheus-stack
-    release_namespace: monitoring
-    values_files:
-      - "{{ role_path }}/files/prometheus-values.yaml"
-    wait: true
-    timeout: "300s"
+  ansible.builtin.shell: >
+    helm upgrade --install kube-prometheus-stack
+    prometheus-community/kube-prometheus-stack
+    --namespace monitoring
+    --set prometheus.prometheusSpec.retention=24h
+    --set prometheus.prometheusSpec.serviceMonitorSelectorNilUsesHelmValues=false
+    --set prometheus.prometheusSpec.serviceMonitorSelector={}
+    --set prometheus.prometheusSpec.serviceMonitorNamespaceSelector={}
+    --set prometheus.service.type=NodePort
+    --set prometheus.service.nodePort=30090
+    --set grafana.adminPassword=devops-training-2024
+    --set grafana.service.type=NodePort
+    --set grafana.service.nodePort=30030
+    --set kubeEtcd.enabled=false
+    --set kubeControllerManager.enabled=false
+    --set kubeScheduler.enabled=false
+    --wait
+    --timeout 300s
+  register: prom_install
+  changed_when: "'UPGRADE' in prom_install.stdout or 'INSTALL' in prom_install.stdout"
 
 - name: Install Loki
-  kubernetes.core.helm:
-    name: loki
-    chart_ref: grafana/loki
-    chart_version: "{{ loki_helm_version }}"
-    release_namespace: monitoring
-    values_files:
-      - "{{ role_path }}/files/loki-values.yaml"
-    set_values:
-      - value: loki.useTestSchema=true
-    timeout: "120s"
+  ansible.builtin.shell: >
+    helm upgrade --install loki grafana/loki
+    --namespace monitoring
+    --set deploymentMode=SingleBinary
+    --set loki.auth_enabled=false
+    --set loki.commonConfig.replication_factor=1
+    --set loki.storage.type=filesystem
+    --set loki.compactor.retention_enabled=false
+    --set singleBinary.replicas=1
+    --set read.replicas=0
+    --set write.replicas=0
+    --set backend.replicas=0
+    --set loki.useTestSchema=true
+    --timeout 120s
+  register: loki_install
+  changed_when: "'UPGRADE' in loki_install.stdout or 'INSTALL' in loki_install.stdout"
 
 - name: Install Promtail
-  kubernetes.core.helm:
-    name: promtail
-    chart_ref: grafana/promtail
-    release_namespace: monitoring
-    values_files:
-      - "{{ role_path }}/files/promtail-values.yaml"
-    wait: true
-    timeout: "120s"
+  ansible.builtin.shell: >
+    helm upgrade --install promtail grafana/promtail
+    --namespace monitoring
+    --set config.clients[0].url=http://loki.monitoring.svc.cluster.local:3100/loki/api/v1/push
+    --wait
+    --timeout 120s
+  register: promtail_install
+  changed_when: "'UPGRADE' in promtail_install.stdout or 'INSTALL' in promtail_install.stdout"
 
 - name: Install Tempo
-  kubernetes.core.helm:
-    name: tempo
-    chart_ref: grafana/tempo
-    release_namespace: monitoring
-    values_files:
-      - "{{ role_path }}/files/tempo-values.yaml"
-    wait: true
-    timeout: "120s"
+  ansible.builtin.shell: >
+    helm upgrade --install tempo grafana/tempo
+    --namespace monitoring
+    --set tempo.storage.trace.backend=local
+    --wait
+    --timeout 120s
+  register: tempo_install
+  changed_when: "'UPGRADE' in tempo_install.stdout or 'INSTALL' in tempo_install.stdout"
 
 - name: Apply ServiceMonitor for taskapi
-  kubernetes.core.k8s:
-    state: present
-    src: "{{ playbook_dir }}/../infrastructure/monitoring/servicemonitor.yaml"
+  ansible.builtin.command: >
+    kubectl apply -f {{ role_path }}/../../../infrastructure/monitoring/servicemonitor.yaml
+  changed_when: false
+  failed_when: false
 
 - name: Apply PrometheusRule alerts
-  kubernetes.core.k8s:
-    state: present
-    src: "{{ playbook_dir }}/../infrastructure/monitoring/prometheusrule.yaml"
+  ansible.builtin.command: >
+    kubectl apply -f {{ role_path }}/../../../infrastructure/monitoring/prometheusrule.yaml
+  changed_when: false
+  failed_when: false
 
 - name: Apply SLO recording rules
-  kubernetes.core.k8s:
-    state: present
-    src: "{{ playbook_dir }}/../infrastructure/monitoring/slo-rules.yaml"
+  ansible.builtin.command: >
+    kubectl apply -f {{ role_path }}/../../../infrastructure/monitoring/slo-rules.yaml
+  changed_when: false
+  failed_when: false
 
-- name: Create Slack webhook secret
-  kubernetes.core.k8s:
-    state: present
-    definition:
-      apiVersion: v1
-      kind: Secret
-      metadata:
-        name: slack-webhook-secret
-        namespace: monitoring
-      stringData:
-        webhook-url: "{{ slack_webhook_url }}"
-  no_log: true
-  when: slack_webhook_url is defined and slack_webhook_url != ""
+- name: Wait for Prometheus to be ready
+  ansible.builtin.command: >
+    kubectl wait --for=condition=available deployment/kube-prometheus-stack-grafana
+    --namespace=monitoring --timeout=120s
+  changed_when: false
+  failed_when: false
 
-- name: Wait for Grafana to be ready
-  kubernetes.core.k8s_info:
-    kind: Deployment
-    name: kube-prometheus-stack-grafana
-    namespace: monitoring
-    wait: true
-    wait_condition:
-      type: Available
-      status: "True"
-    wait_timeout: 180
-
-- name: Start Grafana port-forward for dashboard import
-  ansible.builtin.shell: |
-    pkill -f "port-forward.*3001" 2>/dev/null || true
-    kubectl port-forward -n monitoring svc/kube-prometheus-stack-grafana 3001:80 &
-    sleep 5
+- name: Show monitoring pods
+  ansible.builtin.command: kubectl get pods -n monitoring --no-headers
+  register: mon_pods
   changed_when: false
 
-- name: Import Grafana dashboards
-  ansible.builtin.script:
-    cmd: "{{ role_path }}/files/import-dashboards.sh"
-  changed_when: false
-  ignore_errors: true
+- name: Display monitoring pods
+  ansible.builtin.debug:
+    msg: "{{ mon_pods.stdout_lines }}"

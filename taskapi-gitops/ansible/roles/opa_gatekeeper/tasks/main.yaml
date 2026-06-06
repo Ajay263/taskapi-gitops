@@ -1,68 +1,114 @@
 ---
 - name: Install OPA Gatekeeper
-  kubernetes.core.k8s:
-    state: present
-    src: "https://raw.githubusercontent.com/open-policy-agent/gatekeeper/{{ gatekeeper_version }}/deploy/gatekeeper.yaml"
+  ansible.builtin.command: >
+    kubectl apply -f
+    https://raw.githubusercontent.com/open-policy-agent/gatekeeper/release-3.14/deploy/gatekeeper.yaml
+  changed_when: false
 
 - name: Wait for Gatekeeper controller
-  kubernetes.core.k8s_info:
-    kind: Deployment
-    name: gatekeeper-controller-manager
-    namespace: gatekeeper-system
-    wait: true
-    wait_condition:
-      type: Available
-      status: "True"
-    wait_timeout: 120
+  ansible.builtin.command: >
+    kubectl wait --for=condition=available deployment/gatekeeper-controller-manager
+    --namespace=gatekeeper-system --timeout=120s
+  changed_when: false
+
+- name: Wait for Gatekeeper webhook
+  ansible.builtin.command: >
+    kubectl wait --for=condition=available deployment/gatekeeper-audit
+    --namespace=gatekeeper-system --timeout=120s
+  changed_when: false
 
 - name: Apply RequireNonRoot constraint template
-  kubernetes.core.k8s:
-    state: present
-    definition:
-      apiVersion: templates.gatekeeper.sh/v1
-      kind: ConstraintTemplate
-      metadata:
-        name: requirenonroot
-      spec:
-        crd:
-          spec:
-            names:
-              kind: RequireNonRoot
-        targets:
-          - target: admission.k8s.gatekeeper.sh
-            rego: |
-              package requirenonroot
-              violation[{"msg": msg}] {
-                not input.review.object.spec.securityContext.runAsNonRoot
-                msg := "Containers must not run as root"
-              }
+  ansible.builtin.shell: |
+    kubectl apply -f - <<EOF
+    apiVersion: templates.gatekeeper.sh/v1
+    kind: ConstraintTemplate
+    metadata:
+      name: requirenonroot
+    spec:
+      crd:
+        spec:
+          names:
+            kind: RequireNonRoot
+      targets:
+        - target: admission.k8s.gatekeeper.sh
+          rego: |
+            package requirenonroot
+            violation[{"msg": msg}] {
+              not input.review.object.spec.securityContext.runAsNonRoot
+              msg := "Containers must not run as root"
+            }
+    EOF
+  changed_when: false
 
 - name: Apply RequireNonRoot constraint
-  kubernetes.core.k8s:
-    state: present
-    definition:
-      apiVersion: constraints.gatekeeper.sh/v1beta1
-      kind: RequireNonRoot
-      metadata:
-        name: require-non-root
-      spec:
-        enforcementAction: deny
-        match:
-          kinds:
-            - apiGroups: ["*"]
-              kinds: ["Pod"]
-          namespaces:
-            - taskapi-dev
-            - taskapi-staging
-            - taskapi-prod
-
-- name: Verify constraint is active
-  kubernetes.core.k8s_info:
-    api_version: constraints.gatekeeper.sh/v1beta1
+  ansible.builtin.shell: |
+    kubectl apply -f - <<EOF
+    apiVersion: constraints.gatekeeper.sh/v1beta1
     kind: RequireNonRoot
-    name: require-non-root
-  register: constraint_status
+    metadata:
+      name: require-non-root
+    spec:
+      enforcementAction: deny
+      match:
+        kinds:
+          - apiGroups: ["*"]
+            kinds: ["Pod"]
+        namespaces:
+          - taskapi-dev
+          - taskapi-staging
+          - taskapi-prod
+    EOF
+  changed_when: false
 
-- name: Show constraint status
+- name: Apply RequireResourceLimits constraint template
+  ansible.builtin.shell: |
+    kubectl apply -f - <<EOF
+    apiVersion: templates.gatekeeper.sh/v1
+    kind: ConstraintTemplate
+    metadata:
+      name: requireresourcelimits
+    spec:
+      crd:
+        spec:
+          names:
+            kind: RequireResourceLimits
+      targets:
+        - target: admission.k8s.gatekeeper.sh
+          rego: |
+            package requireresourcelimits
+            violation[{"msg": msg}] {
+              container := input.review.object.spec.containers[_]
+              not container.resources.limits.memory
+              msg := sprintf("Container %v must have memory limits", [container.name])
+            }
+    EOF
+  changed_when: false
+
+- name: Apply RequireResourceLimits constraint
+  ansible.builtin.shell: |
+    kubectl apply -f - <<EOF
+    apiVersion: constraints.gatekeeper.sh/v1beta1
+    kind: RequireResourceLimits
+    metadata:
+      name: require-resource-limits
+    spec:
+      enforcementAction: deny
+      match:
+        kinds:
+          - apiGroups: ["*"]
+            kinds: ["Pod"]
+        namespaces:
+          - taskapi-dev
+          - taskapi-staging
+          - taskapi-prod
+    EOF
+  changed_when: false
+
+- name: Show Gatekeeper status
+  ansible.builtin.command: kubectl get pods -n gatekeeper-system --no-headers
+  register: gk_pods
+  changed_when: false
+
+- name: Display Gatekeeper pods
   ansible.builtin.debug:
-    msg: "OPA constraint require-non-root is {{ 'active' if constraint_status.resources else 'NOT found' }}"
+    msg: "{{ gk_pods.stdout_lines }}"

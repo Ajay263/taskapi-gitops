@@ -1,51 +1,45 @@
 ---
 - name: Create IAM namespace
-  kubernetes.core.k8s:
-    name: iam
-    api_version: v1
-    kind: Namespace
-    state: present
+  ansible.builtin.command: kubectl create namespace iam
+  register: iam_ns
+  changed_when: iam_ns.rc == 0
+  failed_when: iam_ns.rc != 0 and "already exists" not in iam_ns.stderr
 
 - name: Deploy Keycloak
-  kubernetes.core.k8s:
-    state: present
-    src: "{{ playbook_dir }}/../infrastructure/iam/keycloak.yaml"
+  ansible.builtin.command: >
+    kubectl apply -f {{ role_path }}/../../../infrastructure/iam/keycloak.yaml
+  changed_when: false
 
 - name: Wait for Keycloak to be ready
-  kubernetes.core.k8s_info:
-    kind: Deployment
-    name: keycloak
-    namespace: iam
-    wait: true
-    wait_condition:
-      type: Available
-      status: "True"
-    wait_timeout: 300
+  ansible.builtin.command: >
+    kubectl wait --for=condition=available deployment/keycloak
+    --namespace=iam --timeout=300s
+  changed_when: false
 
 - name: Start Keycloak port-forward
   ansible.builtin.shell: |
     pkill -f "port-forward.*keycloak.*8888" 2>/dev/null || true
     kubectl port-forward -n iam svc/keycloak 8888:8080 &
-    sleep 10
+    sleep 15
   changed_when: false
 
 - name: Wait for Keycloak HTTP endpoint
   ansible.builtin.uri:
-    url: "{{ keycloak_url }}/realms/master"
+    url: "http://localhost:8888/realms/master"
     status_code: 200
-  register: result
-  until: result.status == 200
+  register: kc_health
+  until: kc_health.status == 200
   retries: 30
   delay: 10
 
 - name: Get Keycloak admin token
   ansible.builtin.uri:
-    url: "{{ keycloak_url }}/realms/master/protocol/openid-connect/token"
+    url: "http://localhost:8888/realms/master/protocol/openid-connect/token"
     method: POST
     body_format: form-urlencoded
     body:
-      username: "{{ keycloak_admin_user }}"
-      password: "{{ keycloak_admin_password }}"
+      username: admin
+      password: admin123
       grant_type: password
       client_id: admin-cli
     status_code: 200
@@ -54,22 +48,21 @@
 
 - name: Create taskapi realm
   ansible.builtin.uri:
-    url: "{{ keycloak_url }}/admin/realms"
+    url: "http://localhost:8888/admin/realms"
     method: POST
     headers:
       Authorization: "Bearer {{ keycloak_token.json.access_token }}"
     body_format: json
     body:
-      realm: "{{ keycloak_realm }}"
+      realm: taskapi
       enabled: true
       displayName: "TaskAPI Platform"
       accessTokenLifespan: 300
     status_code: [201, 409]
-  no_log: false
 
 - name: Create Keycloak groups
   ansible.builtin.uri:
-    url: "{{ keycloak_url }}/admin/realms/{{ keycloak_realm }}/groups"
+    url: "http://localhost:8888/admin/realms/taskapi/groups"
     method: POST
     headers:
       Authorization: "Bearer {{ keycloak_token.json.access_token }}"
@@ -83,45 +76,9 @@
     - platform-eng
     - readonly
 
-- name: Create Keycloak users
-  ansible.builtin.include_tasks: create_user.yaml
-  loop:
-    - username: alice
-      firstName: Alice
-      lastName: Dev
-      email: alice@taskapi.dev
-      password: alice123
-      groups: [dev-team]
-    - username: bob
-      firstName: Bob
-      lastName: Dev
-      email: bob@taskapi.dev
-      password: bob123
-      groups: [dev-team]
-    - username: charlie
-      firstName: Charlie
-      lastName: Ops
-      email: charlie@taskapi.ops
-      password: charlie123
-      groups: [ops-team, dev-team]
-    - username: diana
-      firstName: Diana
-      lastName: Platform
-      email: diana@taskapi.platform
-      password: diana123
-      groups: [platform-eng]
-    - username: eve
-      firstName: Eve
-      lastName: Readonly
-      email: eve@taskapi.dev
-      password: eve123
-      groups: [readonly]
-  loop_control:
-    loop_var: user_item
-
 - name: Create Kubernetes OIDC client
   ansible.builtin.uri:
-    url: "{{ keycloak_url }}/admin/realms/{{ keycloak_realm }}/clients"
+    url: "http://localhost:8888/admin/realms/taskapi/clients"
     method: POST
     headers:
       Authorization: "Bearer {{ keycloak_token.json.access_token }}"
@@ -135,3 +92,7 @@
       directAccessGrantsEnabled: true
       redirectUris: ["*"]
     status_code: [201, 409]
+
+- name: Show Keycloak status
+  ansible.builtin.debug:
+    msg: "✅ Keycloak configured with taskapi realm and OIDC client"
