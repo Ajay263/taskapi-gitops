@@ -50,12 +50,12 @@
     msg:
       - "role_path: {{ role_path }}"
       - "playbook_dir: {{ playbook_dir }}"
-      - "project file: {{ role_path }}/../../../argocd/projects/taskapi-project.yaml"
+      - "project file: {{ playbook_dir }}/../../argocd/projects/taskapi-project.yaml"
 
 - name: Apply ArgoCD AppProject
   kubernetes.core.k8s:
     state: present
-    src: "{{ role_path }}/../../../argocd/projects/taskapi-project.yaml"
+    src: "{{ playbook_dir }}/../../argocd/projects/taskapi-project.yaml"
 
 - name: Patch AppProject to allow ClusterSecretStore
   kubernetes.core.k8s_json_patch:
@@ -89,4 +89,3 @@
 - name: Display ArgoCD app status
   ansible.builtin.debug:
     msg: "{{ argocd_status.stdout_lines }}"
-# Sat Jun  6 17:04:54 UTC 2026
