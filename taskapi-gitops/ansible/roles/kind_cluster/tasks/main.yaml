@@ -72,3 +72,15 @@
     -p=[{"op":"add","path":"/spec/template/spec/containers/0/args/-","value":"--kubelet-insecure-tls"}]
   changed_when: false
   failed_when: false
+
+- name: Label infra worker node for scheduling
+  ansible.builtin.command: >
+    kubectl label node taskapi-local-worker2 workload=infra --overwrite
+  changed_when: false
+  failed_when: false
+
+- name: Label app worker node for scheduling
+  ansible.builtin.command: >
+    kubectl label node taskapi-local-worker workload=app --overwrite
+  changed_when: false
+  failed_when: false

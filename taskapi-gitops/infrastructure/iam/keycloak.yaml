@@ -26,8 +26,6 @@ spec:
       labels:
         app: keycloak
     spec:
-      nodeSelector:
-        workload: infra
       containers:
         - name: keycloak
           image: quay.io/keycloak/keycloak:23.0
