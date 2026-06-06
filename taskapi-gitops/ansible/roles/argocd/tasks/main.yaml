@@ -1,91 +1,82 @@
 ---
 - name: Add Argo Helm repo
-  kubernetes.core.helm_repository:
-    name: argo
-    repo_url: https://argoproj.github.io/argo-helm
+  ansible.builtin.command: helm repo add argo https://argoproj.github.io/argo-helm
+  changed_when: false
+
+- name: Update Helm repos
+  ansible.builtin.command: helm repo update
+  changed_when: false
 
 - name: Install ArgoCD via Helm
-  kubernetes.core.helm:
-    name: argocd
-    chart_ref: argo/argo-cd
-    chart_version: "{{ argocd_helm_version }}"
-    release_namespace: argocd
-    create_namespace: true
-    values:
-      server:
-        service:
-          type: NodePort
-          nodePort: 30444
-      redis:
-        enabled: true
-    wait: true
-    timeout: "300s"
+  ansible.builtin.shell: >
+    helm upgrade --install argocd argo/argo-cd
+    --version {{ argocd_helm_version }}
+    --namespace argocd
+    --create-namespace
+    --set server.service.type=NodePort
+    --set server.service.nodePort=30444
+    --set redis.enabled=true
+    --wait
+    --timeout 300s
+  register: argocd_helm
+  changed_when: "'UPGRADE' in argocd_helm.stdout or 'INSTALL' in argocd_helm.stdout"
 
-- name: Wait for ArgoCD server
-  kubernetes.core.k8s_info:
-    kind: Deployment
-    name: argocd-server
-    namespace: argocd
-    wait: true
-    wait_condition:
-      type: Available
-      status: "True"
-    wait_timeout: 180
+- name: Wait for ArgoCD server to be ready
+  ansible.builtin.command: >
+    kubectl wait --for=condition=available deployment/argocd-server
+    --namespace=argocd --timeout=180s
+  changed_when: false
 
 - name: Get ArgoCD admin password
   ansible.builtin.shell: |
-    kubectl -n argocd get secret argocd-initial-admin-secret \
-      -o jsonpath="{.data.password}" | base64 -d
+    kubectl -n argocd get secret argocd-initial-admin-secret
+    -o jsonpath="{.data.password}" | base64 -d
   register: argocd_password
   changed_when: false
 
-- name: Add GitOps repository to ArgoCD via kubectl
+- name: Show ArgoCD admin password
+  ansible.builtin.debug:
+    msg: "ArgoCD admin password: {{ argocd_password.stdout }}"
+
+- name: Add GitOps repository to ArgoCD via kubectl secret
   ansible.builtin.shell: |
-    kubectl create secret generic argocd-repo-taskapi-gitops       --namespace argocd       --from-literal=type=git       --from-literal=url={{ argocd_repo_url }}       --from-literal=username=Ajay263       --from-literal=password={{ argocd_repo_token }}       --dry-run=client -o yaml |     kubectl annotate --local -f -       managed-by=argocd.argoproj.io       --dry-run=client -o yaml |     kubectl label --local -f -       argocd.argoproj.io/secret-type=repository       --dry-run=client -o yaml |     kubectl apply -f -
+    kubectl create secret generic argocd-repo-taskapi-gitops       --namespace argocd       --from-literal=type=git       --from-literal=url={{ argocd_repo_url }}       --from-literal=username=Ajay263       --from-literal=password={{ argocd_repo_token }}       --dry-run=client -o yaml |     kubectl label --local -f -       argocd.argoproj.io/secret-type=repository       --dry-run=client -o yaml |     kubectl apply -f -
   changed_when: true
   no_log: true
 
-- name: Debug file paths
+- name: Show paths for debugging
   ansible.builtin.debug:
     msg:
       - "role_path: {{ role_path }}"
-      - "playbook_dir: {{ playbook_dir }}"
-      - "project file: {{ playbook_dir }}/../../argocd/projects/taskapi-project.yaml"
+      - "project file exists check path: {{ role_path }}/../../../argocd/projects/taskapi-project.yaml"
 
 - name: Apply ArgoCD AppProject
-  kubernetes.core.k8s:
-    state: present
-    src: "{{ playbook_dir }}/../../argocd/projects/taskapi-project.yaml"
+  ansible.builtin.command: >
+    kubectl apply -f {{ role_path }}/../../../argocd/projects/taskapi-project.yaml
+  changed_when: false
 
 - name: Patch AppProject to allow ClusterSecretStore
-  kubernetes.core.k8s_json_patch:
-    kind: AppProject
-    name: taskapi
-    namespace: argocd
-    patch:
-      - op: add
-        path: /spec/clusterResourceWhitelist/-
-        value:
-          group: external-secrets.io
-          kind: ClusterSecretStore
+  ansible.builtin.shell: |
+    kubectl patch appproject taskapi -n argocd --type=json -p='"'"'[
+      {"op":"add","path":"/spec/clusterResourceWhitelist/-",
+       "value":{"group":"external-secrets.io","kind":"ClusterSecretStore"}}
+    ]'"'"'
+  changed_when: false
+  failed_when: false
 
 - name: Apply ArgoCD application
-  kubernetes.core.k8s:
-    state: present
-    src: "{{ role_path }}/../../../argocd/apps/taskapi-dev.yaml"
-
-- name: Sync ArgoCD app
   ansible.builtin.command: >
-    argocd app sync taskapi-dev --insecure
-  changed_when: false
-  ignore_errors: true
-
-- name: Show ArgoCD status
-  ansible.builtin.command: >
-    argocd app get taskapi-dev --insecure
-  register: argocd_status
+    kubectl apply -f {{ role_path }}/../../../argocd/apps/taskapi-dev.yaml
   changed_when: false
 
-- name: Display ArgoCD app status
+- name: Show ArgoCD app status
+  ansible.builtin.command: >
+    kubectl get application taskapi-dev -n argocd
+    -o jsonpath="{.status.health.status} {.status.sync.status}"
+  register: argocd_app_status
+  changed_when: false
+  failed_when: false
+
+- name: Display ArgoCD status
   ansible.builtin.debug:
-    msg: "{{ argocd_status.stdout_lines }}"
+    msg: "ArgoCD taskapi-dev status: {{ argocd_app_status.stdout }}"
