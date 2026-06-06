@@ -18,64 +18,28 @@
   failed_when: mon_ns.rc != 0 and "already exists" not in mon_ns.stderr
 
 - name: Install kube-prometheus-stack
-  ansible.builtin.shell: >
-    helm upgrade --install kube-prometheus-stack
-    prometheus-community/kube-prometheus-stack
-    --namespace monitoring
-    --set prometheus.prometheusSpec.retention=24h
-    --set prometheus.prometheusSpec.serviceMonitorSelectorNilUsesHelmValues=false
-    --set prometheus.prometheusSpec.serviceMonitorSelector={}
-    --set prometheus.prometheusSpec.serviceMonitorNamespaceSelector={}
-    --set prometheus.service.type=NodePort
-    --set prometheus.service.nodePort=30090
-    --set grafana.adminPassword=devops-training-2024
-    --set grafana.service.type=NodePort
-    --set grafana.service.nodePort=30030
-    --set kubeEtcd.enabled=false
-    --set kubeControllerManager.enabled=false
-    --set kubeScheduler.enabled=false
-    --wait
-    --timeout 300s
+  ansible.builtin.shell: |
+    helm upgrade --install kube-prometheus-stack       prometheus-community/kube-prometheus-stack       --namespace monitoring       --set prometheus.prometheusSpec.retention=24h       --set prometheus.prometheusSpec.serviceMonitorSelectorNilUsesHelmValues=false       --set prometheus.service.type=NodePort       --set prometheus.service.nodePort=30090       --set grafana.adminPassword=devops-training-2024       --set grafana.service.type=NodePort       --set grafana.service.nodePort=30030       --set kubeEtcd.enabled=false       --set kubeControllerManager.enabled=false       --set kubeScheduler.enabled=false       --wait       --timeout 300s
   register: prom_install
-  changed_when: "'UPGRADE' in prom_install.stdout or 'INSTALL' in prom_install.stdout"
+  changed_when: prom_install.rc == 0
 
 - name: Install Loki
-  ansible.builtin.shell: >
-    helm upgrade --install loki grafana/loki
-    --namespace monitoring
-    --set deploymentMode=SingleBinary
-    --set loki.auth_enabled=false
-    --set loki.commonConfig.replication_factor=1
-    --set loki.storage.type=filesystem
-    --set loki.compactor.retention_enabled=false
-    --set singleBinary.replicas=1
-    --set read.replicas=0
-    --set write.replicas=0
-    --set backend.replicas=0
-    --set loki.useTestSchema=true
-    --timeout 120s
+  ansible.builtin.shell: |
+    helm upgrade --install loki grafana/loki       --namespace monitoring       --set deploymentMode=SingleBinary       --set loki.auth_enabled=false       --set loki.commonConfig.replication_factor=1       --set loki.storage.type=filesystem       --set loki.compactor.retention_enabled=false       --set singleBinary.replicas=1       --set read.replicas=0       --set write.replicas=0       --set backend.replicas=0       --set loki.useTestSchema=true       --timeout 120s
   register: loki_install
-  changed_when: "'UPGRADE' in loki_install.stdout or 'INSTALL' in loki_install.stdout"
+  changed_when: loki_install.rc == 0
 
 - name: Install Promtail
-  ansible.builtin.shell: >
-    helm upgrade --install promtail grafana/promtail
-    --namespace monitoring
-    --set config.clients[0].url=http://loki.monitoring.svc.cluster.local:3100/loki/api/v1/push
-    --wait
-    --timeout 120s
+  ansible.builtin.shell: |
+    helm upgrade --install promtail grafana/promtail       --namespace monitoring       --set "config.clients[0].url=http://loki.monitoring.svc.cluster.local:3100/loki/api/v1/push"       --wait       --timeout 120s
   register: promtail_install
-  changed_when: "'UPGRADE' in promtail_install.stdout or 'INSTALL' in promtail_install.stdout"
+  changed_when: promtail_install.rc == 0
 
 - name: Install Tempo
-  ansible.builtin.shell: >
-    helm upgrade --install tempo grafana/tempo
-    --namespace monitoring
-    --set tempo.storage.trace.backend=local
-    --wait
-    --timeout 120s
+  ansible.builtin.shell: |
+    helm upgrade --install tempo grafana/tempo       --namespace monitoring       --set tempo.storage.trace.backend=local       --wait       --timeout 120s
   register: tempo_install
-  changed_when: "'UPGRADE' in tempo_install.stdout or 'INSTALL' in tempo_install.stdout"
+  changed_when: tempo_install.rc == 0
 
 - name: Apply ServiceMonitor for taskapi
   ansible.builtin.command: >
@@ -92,13 +56,6 @@
 - name: Apply SLO recording rules
   ansible.builtin.command: >
     kubectl apply -f {{ role_path }}/../../../infrastructure/monitoring/slo-rules.yaml
-  changed_when: false
-  failed_when: false
-
-- name: Wait for Prometheus to be ready
-  ansible.builtin.command: >
-    kubectl wait --for=condition=available deployment/kube-prometheus-stack-grafana
-    --namespace=monitoring --timeout=120s
   changed_when: false
   failed_when: false
 
