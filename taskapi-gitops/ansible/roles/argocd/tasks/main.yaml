@@ -45,10 +45,17 @@
   changed_when: true
   no_log: true
 
+- name: Debug file paths
+  ansible.builtin.debug:
+    msg:
+      - "role_path: {{ role_path }}"
+      - "playbook_dir: {{ playbook_dir }}"
+      - "project file: {{ role_path }}/../../../argocd/projects/taskapi-project.yaml"
+
 - name: Apply ArgoCD AppProject
   kubernetes.core.k8s:
     state: present
-    src: "{{ playbook_dir }}/../../argocd/projects/taskapi-project.yaml"
+    src: "{{ role_path }}/../../../argocd/projects/taskapi-project.yaml"
 
 - name: Patch AppProject to allow ClusterSecretStore
   kubernetes.core.k8s_json_patch:
@@ -65,7 +72,7 @@
 - name: Apply ArgoCD application
   kubernetes.core.k8s:
     state: present
-    src: "{{ playbook_dir }}/../../argocd/apps/taskapi-dev.yaml"
+    src: "{{ role_path }}/../../../argocd/apps/taskapi-dev.yaml"
 
 - name: Sync ArgoCD app
   ansible.builtin.command: >
