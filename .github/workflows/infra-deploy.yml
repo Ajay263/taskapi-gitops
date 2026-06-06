@@ -48,6 +48,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          clean: true
 
       - name: Install Python packages and Ansible
         run: |
