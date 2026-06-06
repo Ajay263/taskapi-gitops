@@ -62,7 +62,18 @@ jobs:
 
       - name: Install KinD
         run: |
-          curl -Lo ./kind https://kind.sigs.k8s.io/dl/v0.20.0/kind-linux-amd64
+          # Download with retry and verify it's a binary not HTML
+          for i in 1 2 3; do
+            curl -fsSL -o ./kind https://kind.sigs.k8s.io/dl/v0.20.0/kind-linux-amd64 && break
+            echo "Attempt $i failed, retrying..."
+            sleep 5
+          done
+          # Verify we got a binary not an HTML error page
+          file ./kind | grep -q "ELF" || {
+            echo "Downloaded file is not a binary:"
+            cat ./kind
+            exit 1
+          }
           chmod +x kind && sudo mv kind /usr/local/bin/
           kind version
 
