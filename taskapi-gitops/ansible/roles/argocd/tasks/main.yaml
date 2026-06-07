@@ -9,15 +9,19 @@
 
 - name: Install ArgoCD via Helm
   ansible.builtin.shell: |
-    helm upgrade --install argocd argo/argo-cd \
-      --version {{ argocd_helm_version }} \
-      --namespace argocd \
-      --create-namespace \
-      --set server.service.type=NodePort \
-      --set server.service.nodePort=30444 \
-      --set redis.enabled=true \
-      --wait \
-      --timeout 600s
+    for i in 1 2 3; do
+      helm upgrade --install argocd argo/argo-cd \
+        --version {{ argocd_helm_version }} \
+        --namespace argocd \
+        --create-namespace \
+        --set server.service.type=NodePort \
+        --set server.service.nodePort=30444 \
+        --set redis.enabled=true \
+        --wait \
+        --timeout 600s && break
+      echo "Attempt $i failed, retrying in 30s..."
+      sleep 30
+    done
   register: argocd_helm
   changed_when: argocd_helm.rc == 0
 
