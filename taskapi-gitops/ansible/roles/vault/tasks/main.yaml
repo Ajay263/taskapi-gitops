@@ -64,7 +64,7 @@
   register: vault_init_output
   when: not vault_initialized
   changed_when: true
-  no_log: true
+  no_log: false
 
 - name: Save vault init to file
   ansible.builtin.copy:
@@ -73,7 +73,7 @@
     mode: '0600'
     owner: azureuser
   when: not vault_initialized
-  no_log: true
+  no_log: false
 
 - name: Unseal Vault
   ansible.builtin.command: >
