@@ -74,7 +74,7 @@ jobs:
       - name: Run Ansible playbook on VM
         run: |
           PLAYBOOK="${{ github.event.inputs.playbook || 'verify' }}"
-          ssh -i ~/.ssh/vm-key.pem ${{ secrets.VM_USER }}@${{ secrets.VM_HOST }}             "cd /home/azureuser/taskapi-gitops/taskapi-gitops/ansible &&              ansible-playbook playbooks/${PLAYBOOK}.yaml                -e ansible_python_interpreter=/usr/bin/python3                -e kind_cluster_name=taskapi-local                -e cluster_name=taskapi-local                -v"
+          ssh -i ~/.ssh/vm-key.pem ${{ secrets.VM_USER }}@${{ secrets.VM_HOST }}             "sg docker -c 'cd /home/azureuser/taskapi-gitops/taskapi-gitops/ansible &&              ansible-playbook playbooks/${PLAYBOOK}.yaml                -e ansible_python_interpreter=/usr/bin/python3                -e kind_cluster_name=taskapi-local                -e cluster_name=taskapi-local                -v'"
 
       - name: Notify Slack on success
         if: success()
