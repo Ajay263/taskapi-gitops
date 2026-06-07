@@ -95,10 +95,10 @@
       Accept: "application/vnd.github+json"
     body_format: json
     body:
-      encrypted_value: "{{ item.1 }}"
+      encrypted_value: "{{ item }}"
       key_id: "{{ github_public_key_id }}"
     status_code: [201, 204]
-  loop: "{{ vault_unseal_keys | zip_longest([]) | list | enumerate | list }}"
+  loop: "{{ vault_unseal_keys }}"
   when: not vault_initialized
   no_log: true
   ignore_errors: true
@@ -119,21 +119,20 @@
 
 - name: Unseal Vault using keys from file
   ansible.builtin.shell: |
-    if [ -f /home/azureuser/.vault-init.json ]; then
-      KEYS=$(python3 -c "
-    import json
-    data = json.load(open('/home/azureuser/.vault-init.json'))
-    keys = data['unseal_keys_b64'][:3]
-    print('\n'.join(keys))
-    ")
-      while IFS= read -r key; do
-        kubectl exec -n vault vault-0 -- vault operator unseal "$key" || true
-      done <<< "$KEYS"
-    else
-      echo "No init file found — Vault may already be unsealed"
-    fi
+    KEYS=$(python3 -c "
+import json
+data = json.load(open('/home/azureuser/.vault-init.json'))
+keys = data['unseal_keys_b64'][:3]
+for k in keys:
+    print(k)
+")
+    for key in $KEYS; do
+      kubectl exec -n vault vault-0 -- vault operator unseal "$key" 2>/dev/null || true
+    done
+  args:
+    executable: /bin/bash
   changed_when: false
-  when: vault_sealed | default(true)
+  when: vault_sealed | default(true) | default(true)
 
 - name: Wait for Vault to be unsealed
   ansible.builtin.command: >
