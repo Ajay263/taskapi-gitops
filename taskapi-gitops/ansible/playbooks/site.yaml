@@ -10,6 +10,8 @@
     - ../group_vars/all.vault.yaml
 
   roles:
+    - role: ../roles/bootstrap
+      tags: [bootstrap, always]
     - role: ../roles/kind_cluster
       tags: [cluster, always]
     - role: ../roles/vault

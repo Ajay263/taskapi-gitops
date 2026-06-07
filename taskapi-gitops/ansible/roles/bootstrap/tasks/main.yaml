@@ -1,0 +1,118 @@
+---
+- name: Update apt cache
+  ansible.builtin.apt:
+    update_cache: true
+    cache_valid_time: 3600
+  become: true
+
+- name: Install system dependencies
+  ansible.builtin.apt:
+    name:
+      - docker.io
+      - curl
+      - git
+      - python3
+      - python3-pip
+      - apt-transport-https
+      - ca-certificates
+    state: present
+  become: true
+
+- name: Start and enable Docker
+  ansible.builtin.systemd:
+    name: docker
+    state: started
+    enabled: true
+  become: true
+
+- name: Add user to docker group
+  ansible.builtin.user:
+    name: "{{ ansible_user_id }}"
+    groups: docker
+    append: true
+  become: true
+
+- name: Install Python packages
+  ansible.builtin.pip:
+    name:
+      - kubernetes
+      - jmespath
+    state: present
+    break_system_packages: true
+
+- name: Check if kubectl installed
+  ansible.builtin.command: kubectl version --client
+  register: kubectl_check
+  changed_when: false
+  failed_when: false
+
+- name: Install kubectl
+  ansible.builtin.shell: |
+    KUBECTL_VERSION=$(curl -L -s https://dl.k8s.io/release/stable.txt)
+    curl -fsSL -o /tmp/kubectl "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/amd64/kubectl"
+    chmod +x /tmp/kubectl && mv /tmp/kubectl /usr/local/bin/kubectl
+  become: true
+  when: kubectl_check.rc != 0
+
+- name: Check if KinD installed
+  ansible.builtin.command: kind version
+  register: kind_check
+  changed_when: false
+  failed_when: false
+
+- name: Install KinD
+  ansible.builtin.shell: |
+    for i in 1 2 3; do
+      curl -fsSL -o /tmp/kind https://kind.sigs.k8s.io/dl/v0.20.0/kind-linux-amd64 && break
+      sleep 5
+    done
+    file /tmp/kind | grep -q "ELF" || exit 1
+    chmod +x /tmp/kind && mv /tmp/kind /usr/local/bin/kind
+  become: true
+  when: kind_check.rc != 0
+
+- name: Check if Helm installed
+  ansible.builtin.command: helm version --short
+  register: helm_check
+  changed_when: false
+  failed_when: false
+
+- name: Install Helm
+  ansible.builtin.shell: |
+    curl -fsSL -o /tmp/get_helm.sh \
+      https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3
+    chmod 700 /tmp/get_helm.sh && /tmp/get_helm.sh
+  become: true
+  when: helm_check.rc != 0
+
+- name: Check if ArgoCD CLI installed
+  ansible.builtin.command: argocd version --client
+  register: argocd_check
+  changed_when: false
+  failed_when: false
+
+- name: Install ArgoCD CLI
+  ansible.builtin.shell: |
+    curl -fsSL -o /tmp/argocd \
+      https://github.com/argoproj/argo-cd/releases/latest/download/argocd-linux-amd64
+    chmod +x /tmp/argocd && mv /tmp/argocd /usr/local/bin/argocd
+  become: true
+  when: argocd_check.rc != 0
+
+- name: Install Ansible collections
+  ansible.builtin.command: >
+    ansible-galaxy collection install kubernetes.core community.general
+  changed_when: false
+
+- name: Verify all tools
+  ansible.builtin.shell: |
+    echo "Docker: $(docker --version)"
+    echo "kubectl: $(kubectl version --client --short 2>/dev/null)"
+    echo "KinD: $(kind version)"
+    echo "Helm: $(helm version --short)"
+  register: tool_check
+  changed_when: false
+
+- name: Show tool versions
+  ansible.builtin.debug:
+    msg: "{{ tool_check.stdout_lines }}"

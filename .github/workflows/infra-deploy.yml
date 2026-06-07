@@ -1,6 +1,11 @@
 name: Infrastructure Deploy
 
 on:
+  push:
+    branches: [main]
+    paths:
+      - 'taskapi-gitops/ansible/**'
+      - 'taskapi-gitops/infrastructure/**'
   workflow_dispatch:
     inputs:
       playbook:
@@ -26,6 +31,8 @@ jobs:
         working-directory: taskapi-gitops/ansible
     steps:
       - uses: actions/checkout@v4
+        with:
+          clean: true
       - name: Install Ansible
         run: pip install ansible ansible-lint
       - name: Install collections
@@ -39,84 +46,44 @@ jobs:
         continue-on-error: true
 
   deploy:
-    name: "🚀 Deploy Full Infrastructure"
+    name: "🚀 Deploy on Azure VM"
     runs-on: ubuntu-latest
     needs: lint
-    defaults:
-      run:
-        working-directory: taskapi-gitops/ansible
 
     steps:
       - uses: actions/checkout@v4
         with:
           clean: true
 
-      - name: Install Python packages and Ansible
+      - name: Setup SSH key
         run: |
-          pip install ansible jmespath kubernetes
-          ansible-galaxy collection install kubernetes.core community.general
+          mkdir -p ~/.ssh
+          echo "${{ secrets.VM_SSH_KEY }}" > ~/.ssh/vm-key.pem
+          chmod 600 ~/.ssh/vm-key.pem
+          ssh-keyscan -H ${{ secrets.VM_HOST }} >> ~/.ssh/known_hosts
 
-      - name: Install kubectl
+      - name: Copy latest code to VM
         run: |
-          curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
-          chmod +x kubectl && sudo mv kubectl /usr/local/bin/
-          kubectl version --client
+          ssh -i ~/.ssh/vm-key.pem ${{ secrets.VM_USER }}@${{ secrets.VM_HOST }} \
+            "cd /home/azureuser/taskapi-gitops && git pull origin main"
 
-      - name: Install KinD
+      - name: Run Ansible playbook on VM
         run: |
-          # Download with retry and verify it's a binary not HTML
-          for i in 1 2 3; do
-            curl -fsSL -o ./kind https://kind.sigs.k8s.io/dl/v0.20.0/kind-linux-amd64 && break
-            echo "Attempt $i failed, retrying..."
-            sleep 5
-          done
-          # Verify we got a binary not an HTML error page
-          file ./kind | grep -q "ELF" || {
-            echo "Downloaded file is not a binary:"
-            cat ./kind
-            exit 1
-          }
-          chmod +x kind && sudo mv kind /usr/local/bin/
-          kind version
-
-      - name: Install Helm
-        uses: azure/setup-helm@v4
-        with:
-          version: latest
-
-      - name: Install ArgoCD CLI
-        run: |
-          curl -sSL -o argocd https://github.com/argoproj/argo-cd/releases/latest/download/argocd-linux-amd64
-          chmod +x argocd && sudo mv argocd /usr/local/bin/
-          argocd version --client
-
-      - name: Write vault password
-        run: echo "${{ secrets.ANSIBLE_VAULT_PASSWORD }}" > .vault_pass
-
-      - name: Run Ansible playbook
-        env:
-          GITOPS_PAT: ${{ secrets.GITOPS_PAT }}
-          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
-          ANSIBLE_VAULT_PASSWORD_FILE: .vault_pass
-        run: |
-          ansible-playbook playbooks/${{ github.event.inputs.playbook }}.yaml \
-            -e "ansible_python_interpreter=$(which python3)" \
-            -e "kind_cluster_name=taskapi-local" \
-            -e "cluster_name=taskapi-local" \
-            -v
-
-      - name: Show cluster status
-        if: always()
-        run: |
-          kubectl get nodes 2>/dev/null || echo "No cluster"
-          kubectl get pods -A 2>/dev/null | grep -v Running | grep -v Completed || echo "All pods running"
+          PLAYBOOK="${{ github.event.inputs.playbook || 'verify' }}"
+          ssh -i ~/.ssh/vm-key.pem ${{ secrets.VM_USER }}@${{ secrets.VM_HOST }} \
+            "cd /home/azureuser/taskapi-gitops/taskapi-gitops/ansible && \
+             ansible-playbook playbooks/${PLAYBOOK}.yaml \
+               -e 'ansible_python_interpreter=/usr/bin/python3' \
+               -e 'kind_cluster_name=taskapi-local' \
+               -e 'cluster_name=taskapi-local' \
+               -v 2>&1"
 
       - name: Notify Slack on success
         if: success()
         uses: slackapi/slack-github-action@v1.26.0
         with:
           payload: |
-            {"text": "✅ Infrastructure *${{ github.event.inputs.playbook }}* succeeded on GitHub Actions\nRun: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"}
+            {"text": "✅ Infrastructure deploy succeeded on Azure VM\nPlaybook: ${{ github.event.inputs.playbook || 'verify' }}\nCommit: ${{ github.sha }}"}
         env:
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
         continue-on-error: true
@@ -126,7 +93,7 @@ jobs:
         uses: slackapi/slack-github-action@v1.26.0
         with:
           payload: |
-            {"text": "❌ Infrastructure *${{ github.event.inputs.playbook }}* FAILED\nSee: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"}
+            {"text": "❌ Infrastructure deploy FAILED on Azure VM\nSee: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"}
         env:
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
         continue-on-error: true

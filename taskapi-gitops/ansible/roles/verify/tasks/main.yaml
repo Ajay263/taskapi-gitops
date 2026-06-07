@@ -25,7 +25,7 @@
 - name: Verify taskapi health via kubectl exec
   ansible.builtin.command: >
     kubectl exec -n taskapi-dev deploy/taskapi
-    -- wget -q -O- http://localhost:8000/health
+    -- curl -s http://localhost:8000/health
   register: verify_health_raw
   changed_when: false
   retries: 3
