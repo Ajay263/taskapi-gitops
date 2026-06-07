@@ -2,15 +2,51 @@ server {
     listen 80;
     server_name _;
 
-    # Increase timeouts for slow services
     proxy_connect_timeout 60s;
     proxy_read_timeout 60s;
 
-    location / {
-        proxy_pass http://127.0.0.1:{{ nginx_nodeport.stdout }};
+    location /api/ {
+        proxy_pass http://127.0.0.1:8080/;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    location /grafana/ {
+        proxy_pass http://127.0.0.1:3000/;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+    }
+
+    location ~* ^/prometheus(.*) {
+        proxy_pass http://{{ kind_node_ip }}:30090$1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_redirect ~^(http://[^/]+)(/.*)?$ $1/prometheus$2;
+    }
+
+    location ~* ^/alertmanager(.*) {
+        proxy_pass http://{{ kind_node_ip }}:30093$1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_redirect ~^(http://[^/]+)(/.*)?$ $1/alertmanager$2;
+    }
+
+    location /argocd/ {
+        proxy_pass http://127.0.0.1:8443/;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+    }
+
+    location /keycloak/ {
+        proxy_pass http://{{ kind_node_ip }}:30888/;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+    }
+
+    location /vault/ {
+        proxy_pass http://{{ kind_node_ip }}:30200/;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
     }
 }

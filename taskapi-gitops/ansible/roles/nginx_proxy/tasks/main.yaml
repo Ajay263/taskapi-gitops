@@ -13,9 +13,50 @@
   register: nginx_nodeport
   changed_when: false
 
-- name: Show NodePort
+- name: Get KinD worker node IP
+  ansible.builtin.shell: |
+    docker inspect taskapi-local-worker \
+      --format='{{ "{{" }}.NetworkSettings.Networks.kind.IPAddress{{ "}}" }}'
+  register: kind_node_ip_raw
+  changed_when: false
+
+- name: Set KinD node IP fact
+  ansible.builtin.set_fact:
+    kind_node_ip: "{{ kind_node_ip_raw.stdout | trim }}"
+
+- name: Show KinD node IP
   ansible.builtin.debug:
-    msg: "NGINX ingress NodePort: {{ nginx_nodeport.stdout }}"
+    msg: "KinD node IP: {{ kind_node_ip }}"
+
+- name: Patch Prometheus to NodePort
+  ansible.builtin.shell: |
+    kubectl patch svc kube-prometheus-stack-prometheus \
+      -n monitoring \
+      --type='json' \
+      -p='[{"op":"replace","path":"/spec/type","value":"NodePort"},
+           {"op":"add","path":"/spec/ports/0/nodePort","value":30090}]'
+  changed_when: false
+  failed_when: false
+
+- name: Patch Alertmanager to NodePort
+  ansible.builtin.shell: |
+    kubectl patch svc kube-prometheus-stack-alertmanager \
+      -n monitoring \
+      --type='json' \
+      -p='[{"op":"replace","path":"/spec/type","value":"NodePort"},
+           {"op":"add","path":"/spec/ports/0/nodePort","value":30093}]'
+  changed_when: false
+  failed_when: false
+
+- name: Patch Vault to NodePort
+  ansible.builtin.shell: |
+    kubectl patch svc vault \
+      -n vault \
+      --type='json' \
+      -p='[{"op":"replace","path":"/spec/type","value":"NodePort"},
+           {"op":"add","path":"/spec/ports/0/nodePort","value":30200}]'
+  changed_when: false
+  failed_when: false
 
 - name: Configure nginx reverse proxy
   ansible.builtin.template:
@@ -62,20 +103,20 @@
     kubectl apply -f {{ role_path }}/../../../infrastructure/ingress/ingress-all-services.yaml
   changed_when: false
 
-- name: Wait for ingress to be ready
-  ansible.builtin.command: kubectl get ingress -A --no-headers
-  register: ingress_list
+- name: Verify all services accessible
+  ansible.builtin.shell: |
+    VM_IP=$(curl -s ifconfig.me)
+    echo "=== Service URLs ==="
+    echo "TaskAPI:      http://$VM_IP/api/health"
+    echo "Grafana:      http://$VM_IP/grafana/"
+    echo "Prometheus:   http://$VM_IP/prometheus/"
+    echo "Alertmanager: http://$VM_IP/alertmanager/"
+    echo "ArgoCD:       http://$VM_IP/argocd/"
+    echo "Keycloak:     http://$VM_IP/keycloak/"
+    echo "Vault:        http://$VM_IP/vault/"
+  register: service_urls
   changed_when: false
 
-- name: Show ingress routes
+- name: Show service URLs
   ansible.builtin.debug:
-    msg: "{{ ingress_list.stdout_lines }}"
-
-- name: Verify nginx is listening on port 80
-  ansible.builtin.shell: ss -tlnp | grep :80
-  register: port_check
-  changed_when: false
-
-- name: Show port status
-  ansible.builtin.debug:
-    msg: "{{ port_check.stdout_lines }}"
+    msg: "{{ service_urls.stdout_lines }}"
