@@ -1,16 +1,11 @@
 ---
-# Namespace for all IAM components
 apiVersion: v1
 kind: Namespace
 metadata:
   name: iam
   labels:
     app: keycloak
-
 ---
-# Keycloak deployment
-# Using dev mode for training (persistent storage for production)
-# Dev mode: H2 in-memory DB, no TLS required, admin console enabled
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -29,7 +24,7 @@ spec:
       containers:
         - name: keycloak
           image: quay.io/keycloak/keycloak:23.0
-          args: ["start-dev"]   # Dev mode: no TLS, H2 DB, full admin UI
+          args: ["start-dev"]
           env:
             - name: KEYCLOAK_ADMIN
               value: "admin"
@@ -46,24 +41,25 @@ spec:
               name: http
           resources:
             requests:
-              memory: "512Mi"
-              cpu: "200m"
+              memory: "256Mi"
+              cpu: "100m"
             limits:
-              memory: "1Gi"
+              memory: "768Mi"
               cpu: "500m"
           readinessProbe:
             httpGet:
               path: /realms/master
               port: 8080
-            initialDelaySeconds: 30
-            periodSeconds: 10
+            initialDelaySeconds: 120
+            periodSeconds: 15
+            failureThreshold: 10
           livenessProbe:
             httpGet:
               path: /realms/master
               port: 8080
-            initialDelaySeconds: 60
+            initialDelaySeconds: 180
             periodSeconds: 20
-
+            failureThreshold: 5
 ---
 apiVersion: v1
 kind: Service
