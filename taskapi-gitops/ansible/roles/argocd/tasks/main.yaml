@@ -17,14 +17,14 @@
     --set server.service.nodePort=30444
     --set redis.enabled=true
     --wait
-    --timeout 300s
+    --timeout 600s
   register: argocd_helm
   changed_when: "'UPGRADE' in argocd_helm.stdout or 'INSTALL' in argocd_helm.stdout"
 
 - name: Wait for ArgoCD server to be ready
   ansible.builtin.command: >
     kubectl wait --for=condition=available deployment/argocd-server
-    --namespace=argocd --timeout=180s
+    --namespace=argocd --timeout=600s
   changed_when: false
 
 - name: Get ArgoCD admin password

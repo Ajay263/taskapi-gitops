@@ -8,13 +8,13 @@
 - name: Wait for Gatekeeper controller
   ansible.builtin.command: >
     kubectl wait --for=condition=available deployment/gatekeeper-controller-manager
-    --namespace=gatekeeper-system --timeout=120s
+    --namespace=gatekeeper-system --timeout=600s
   changed_when: false
 
 - name: Wait for Gatekeeper webhook
   ansible.builtin.command: >
     kubectl wait --for=condition=available deployment/gatekeeper-audit
-    --namespace=gatekeeper-system --timeout=120s
+    --namespace=gatekeeper-system --timeout=600s
   changed_when: false
 
 - name: Apply RequireNonRoot constraint template

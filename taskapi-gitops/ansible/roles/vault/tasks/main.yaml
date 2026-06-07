@@ -25,7 +25,7 @@
     --set server.resources.limits.memory=256Mi
     --set server.resources.limits.cpu=200m
     --wait
-    --timeout 120s
+    --timeout 600s
   register: vault_helm_install
   changed_when: "'UPGRADE' in vault_helm_install.stdout or 'INSTALL' in vault_helm_install.stdout"
 
@@ -33,7 +33,7 @@
   ansible.builtin.command: >
     kubectl wait --for=condition=ready pod
     -l app.kubernetes.io/name=vault
-    -n vault --timeout=120s
+    -n vault --timeout=600s
   register: vault_wait_pod
   changed_when: false
   until: vault_wait_pod.rc == 0

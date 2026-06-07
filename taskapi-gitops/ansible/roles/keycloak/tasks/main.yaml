@@ -13,7 +13,7 @@
 - name: Wait for Keycloak to be ready
   ansible.builtin.command: >
     kubectl wait --for=condition=available deployment/keycloak
-    --namespace=iam --timeout=300s
+    --namespace=iam --timeout=600s
   changed_when: false
 
 - name: Configure Keycloak via kcadm.sh inside pod

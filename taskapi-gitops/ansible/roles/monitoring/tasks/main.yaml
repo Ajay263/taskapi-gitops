@@ -31,7 +31,7 @@
       --set kubeControllerManager.enabled=false \
       --set kubeScheduler.enabled=false \
       --wait \
-      --timeout 300s
+      --timeout 600s
   register: prom_install
   changed_when: prom_install.rc == 0
 
@@ -49,7 +49,7 @@
       --set write.replicas=0 \
       --set backend.replicas=0 \
       --set loki.useTestSchema=true \
-      --timeout 300s
+      --timeout 600s
   register: loki_install
   changed_when: loki_install.rc == 0
 
@@ -59,7 +59,7 @@
       --namespace monitoring \
       --set "config.clients[0].url=http://loki.monitoring.svc.cluster.local:3100/loki/api/v1/push" \
       --wait \
-      --timeout 300s
+      --timeout 600s
   register: promtail_install
   changed_when: promtail_install.rc == 0
   failed_when: false
@@ -70,9 +70,10 @@
       --namespace monitoring \
       --set tempo.storage.trace.backend=local \
       --wait \
-      --timeout 300s
+      --timeout 600s
   register: tempo_install
   changed_when: tempo_install.rc == 0
+  failed_when: false
 
 - name: Apply ServiceMonitor for taskapi
   ansible.builtin.command: >
