@@ -1,0 +1,76 @@
+---
+- name: Install nginx
+  ansible.builtin.apt:
+    name: nginx
+    state: present
+    update_cache: true
+  become: true
+
+- name: Get NGINX ingress NodePort
+  ansible.builtin.shell: |
+    kubectl get svc ingress-nginx-controller -n ingress-nginx \
+      -o jsonpath='{.spec.ports[?(@.port==80)].nodePort}'
+  register: nginx_nodeport
+  changed_when: false
+
+- name: Show NodePort
+  ansible.builtin.debug:
+    msg: "NGINX ingress NodePort: {{ nginx_nodeport.stdout }}"
+
+- name: Configure nginx reverse proxy
+  ansible.builtin.template:
+    src: k8s-proxy.conf.j2
+    dest: /etc/nginx/sites-available/k8s-proxy
+    mode: '0644'
+  become: true
+  notify: restart nginx
+
+- name: Enable k8s-proxy site
+  ansible.builtin.file:
+    src: /etc/nginx/sites-available/k8s-proxy
+    dest: /etc/nginx/sites-enabled/k8s-proxy
+    state: link
+  become: true
+  notify: restart nginx
+
+- name: Disable default nginx site
+  ansible.builtin.file:
+    path: /etc/nginx/sites-enabled/default
+    state: absent
+  become: true
+  notify: restart nginx
+
+- name: Test nginx config
+  ansible.builtin.command: nginx -t
+  become: true
+  changed_when: false
+
+- name: Start and enable nginx
+  ansible.builtin.systemd:
+    name: nginx
+    state: started
+    enabled: true
+  become: true
+
+- name: Apply all service ingress manifests
+  ansible.builtin.command: >
+    kubectl apply -f {{ role_path }}/../../../infrastructure/ingress/ingress-all-services.yaml
+  changed_when: false
+
+- name: Wait for ingress to be ready
+  ansible.builtin.command: kubectl get ingress -A --no-headers
+  register: ingress_list
+  changed_when: false
+
+- name: Show ingress routes
+  ansible.builtin.debug:
+    msg: "{{ ingress_list.stdout_lines }}"
+
+- name: Verify nginx is listening on port 80
+  ansible.builtin.shell: ss -tlnp | grep :80
+  register: port_check
+  changed_when: false
+
+- name: Show port status
+  ansible.builtin.debug:
+    msg: "{{ port_check.stdout_lines }}"

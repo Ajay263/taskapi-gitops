@@ -20,6 +20,8 @@
       tags: [secrets, eso]
     - role: ../roles/argocd
       tags: [argocd, gitops]
+    - role: ../roles/nginx_proxy
+      tags: [nginx, proxy, always]
     - role: ../roles/monitoring
       tags: [monitoring, observability]
     - role: ../roles/keycloak
