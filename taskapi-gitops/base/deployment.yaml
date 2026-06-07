@@ -117,7 +117,7 @@ spec:
           # limits:   hard cap — pod is killed (OOMKill) or throttled if exceeded
           resources:
             requests:
-              memory: "64Mi"
+              memory: "256Mi"
               cpu: "50m"    # 50 millicores = 5% of one CPU core
             limits:
               memory: "128Mi"
