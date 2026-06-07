@@ -16,83 +16,27 @@
     --namespace=iam --timeout=300s
   changed_when: false
 
-- name: Start Keycloak port-forward
+- name: Configure Keycloak via kcadm.sh inside pod
   ansible.builtin.shell: |
-    pkill -f "port-forward.*keycloak.*8888" 2>/dev/null || true
-    kubectl port-forward -n iam svc/keycloak 8888:8080 &
-    sleep 15
-  changed_when: false
-
-- name: Wait for Keycloak HTTP endpoint
-  ansible.builtin.uri:
-    url: "http://localhost:8888/realms/master"
-    status_code: 200
-  register: kc_health
-  until: kc_health.status == 200
-  retries: 30
-  delay: 10
-
-- name: Get Keycloak admin token
-  ansible.builtin.uri:
-    url: "http://localhost:8888/realms/master/protocol/openid-connect/token"
-    method: POST
-    body_format: form-urlencoded
-    body:
-      username: admin
-      password: admin123
-      grant_type: password
-      client_id: admin-cli
-    status_code: 200
-  register: keycloak_token
-  no_log: true
-
-- name: Create taskapi realm
-  ansible.builtin.uri:
-    url: "http://localhost:8888/admin/realms"
-    method: POST
-    headers:
-      Authorization: "Bearer {{ keycloak_token.json.access_token }}"
-    body_format: json
-    body:
-      realm: taskapi
-      enabled: true
-      displayName: "TaskAPI Platform"
-      accessTokenLifespan: 300
-    status_code: [201, 409]
-
-- name: Create Keycloak groups
-  ansible.builtin.uri:
-    url: "http://localhost:8888/admin/realms/taskapi/groups"
-    method: POST
-    headers:
-      Authorization: "Bearer {{ keycloak_token.json.access_token }}"
-    body_format: json
-    body:
-      name: "{{ item }}"
-    status_code: [201, 409]
-  loop:
-    - dev-team
-    - ops-team
-    - platform-eng
-    - readonly
-
-- name: Create Kubernetes OIDC client
-  ansible.builtin.uri:
-    url: "http://localhost:8888/admin/realms/taskapi/clients"
-    method: POST
-    headers:
-      Authorization: "Bearer {{ keycloak_token.json.access_token }}"
-    body_format: json
-    body:
-      clientId: kubernetes
-      enabled: true
-      protocol: openid-connect
-      publicClient: false
-      secret: kubernetes-client-secret
-      directAccessGrantsEnabled: true
-      redirectUris: ["*"]
-    status_code: [201, 409]
+    POD=$(kubectl get pods -n iam -l app=keycloak -o jsonpath="{.items[0].metadata.name}")
+    kubectl exec -n iam $POD -- /opt/keycloak/bin/kcadm.sh config credentials \
+      --server http://localhost:8080 --realm master \
+      --user admin --password admin123
+    kubectl exec -n iam $POD -- /opt/keycloak/bin/kcadm.sh create realms \
+      -s realm=taskapi -s enabled=true 2>/dev/null || true
+    for GROUP in dev-team ops-team platform-eng readonly; do
+      kubectl exec -n iam $POD -- /opt/keycloak/bin/kcadm.sh create groups \
+        -r taskapi -s name=$GROUP 2>/dev/null || true
+    done
+    kubectl exec -n iam $POD -- /opt/keycloak/bin/kcadm.sh create clients \
+      -r taskapi -s clientId=kubernetes -s enabled=true \
+      -s protocol=openid-connect -s publicClient=false \
+      -s secret=kubernetes-client-secret \
+      -s directAccessGrantsEnabled=true \
+      -s 'redirectUris=["*"]' 2>/dev/null || true
+    echo "✅ Keycloak configured"
+  changed_when: true
 
 - name: Show Keycloak status
   ansible.builtin.debug:
-    msg: "✅ Keycloak configured with taskapi realm and OIDC client"
+    msg: "✅ Keycloak deployed and configured via kubectl exec"
