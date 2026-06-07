@@ -40,24 +40,25 @@
   failed_when: false
 
 - name: Check if Vault is initialized
-  ansible.builtin.command: kubectl exec -n vault vault-0 -- vault status -format=json
+  ansible.builtin.command: >
+    kubectl exec -n vault vault-0 -- vault status -format=json
   register: vault_status_raw
   changed_when: false
   failed_when: false
 
-- name: Set vault facts from status
+- name: Set vault initialized fact
   ansible.builtin.set_fact:
     vault_initialized: "{{ (vault_status_raw.stdout | from_json).initialized | default(false) }}"
     vault_sealed: "{{ (vault_status_raw.stdout | from_json).sealed | default(true) }}"
-  when: vault_status_raw.rc == 0 and vault_status_raw.stdout != ""
+  when: vault_status_raw.stdout != ""
 
-- name: Set vault defaults
+- name: Set vault defaults when no output
   ansible.builtin.set_fact:
     vault_initialized: false
     vault_sealed: true
-  when: vault_status_raw.rc != 0 or vault_status_raw.stdout == ""
+  when: vault_status_raw.stdout == ""
 
-- name: Initialize Vault
+- name: Initialize Vault first time only
   ansible.builtin.command: >
     kubectl exec -n vault vault-0 --
     vault operator init -key-shares=5 -key-threshold=3 -format=json
@@ -73,30 +74,41 @@
     mode: '0600'
     owner: azureuser
   when: not vault_initialized
-  no_log: false
 
-- name: Unseal Vault
+- name: Check init file exists
+  ansible.builtin.stat:
+    path: /home/azureuser/.vault-init.json
+  register: vault_init_file
+
+- name: Fail if no init file
+  ansible.builtin.fail:
+    msg: "Vault init file not found — run site.yaml from scratch"
+  when: not vault_init_file.stat.exists
+
+- name: Get unseal keys from file
   ansible.builtin.command: >
     python3 {{ role_path }}/files/get-unseal-keys.py
   register: unseal_keys
   changed_when: false
 
-- name: Run unseal for each key
+- name: Unseal Vault
   ansible.builtin.command: >
     kubectl exec -n vault vault-0 -- vault operator unseal {{ item }}
   loop: "{{ unseal_keys.stdout_lines }}"
   changed_when: false
   failed_when: false
+  when: vault_sealed | default(true)
 
 - name: Wait for Vault to be unsealed
-  ansible.builtin.command: kubectl exec -n vault vault-0 -- vault status -format=json
+  ansible.builtin.command: >
+    kubectl exec -n vault vault-0 -- vault status -format=json
   register: vault_unsealed_check
   until: not (vault_unsealed_check.stdout | from_json).sealed
   retries: 10
   delay: 5
   changed_when: false
 
-- name: Get root token
+- name: Get root token from file
   ansible.builtin.command: >
     python3 -c "import json; d=json.load(open('/home/azureuser/.vault-init.json')); print(d['root_token'])"
   register: vault_token_from_file
@@ -106,7 +118,7 @@
   ansible.builtin.set_fact:
     vault_root_token: "{{ vault_token_from_file.stdout | trim }}"
 
-- name: Copy policy files to vault pod
+- name: Copy policy and config files to vault pod
   ansible.builtin.command: >
     kubectl cp {{ role_path }}/files/{{ item }} vault/vault-0:/tmp/{{ item }}
   loop:
@@ -116,7 +128,7 @@
     - configure-vault.sh
   changed_when: false
 
-- name: Configure Vault
+- name: Configure Vault auth and secrets
   ansible.builtin.command: >
     kubectl exec -n vault vault-0 -- sh /tmp/configure-vault.sh {{ vault_root_token }}
   changed_when: true
