@@ -63,7 +63,7 @@
           auth:
             kubernetes:
               mountPath: "kubernetes"
-              role: "taskapi-dev"
+              role: "external-secrets"
               serviceAccountRef:
                 name: "external-secrets"
                 namespace: "external-secrets"

@@ -32,4 +32,11 @@ vault write auth/kubernetes/role/taskapi-prod \
   bound_service_account_namespaces=taskapi-prod \
   policies=taskapi-prod ttl=1h
 
+# Role for External Secrets Operator
+vault write auth/kubernetes/role/external-secrets \
+  bound_service_account_names=external-secrets \
+  bound_service_account_namespaces=external-secrets \
+  policies=taskapi-dev,taskapi-staging,taskapi-prod \
+  ttl=24h
+
 echo "Vault configured successfully"
