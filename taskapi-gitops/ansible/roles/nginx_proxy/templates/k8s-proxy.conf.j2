@@ -4,6 +4,7 @@ server {
     proxy_connect_timeout 60s;
     proxy_read_timeout 60s;
 
+    # TaskAPI
     location /api/ {
         proxy_pass http://{{ kind_node_ip }}:32569/api/;
         proxy_set_header Host $host;
@@ -11,6 +12,14 @@ server {
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
     }
 
+    # Fix Swagger UI openapi.json path
+    location = /openapi.json {
+        proxy_pass http://{{ kind_node_ip }}:32569/api/openapi.json;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+    }
+
+    # Grafana
     location /grafana/ {
         proxy_pass http://{{ kind_node_ip }}:30030/grafana/;
         proxy_set_header Host $host;
@@ -18,18 +27,21 @@ server {
         proxy_set_header X-Forwarded-Proto http;
     }
 
+    # Prometheus
     location ~* ^/prometheus(.*) {
         proxy_pass http://{{ kind_node_ip }}:30090/prometheus$1;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
     }
 
+    # Alertmanager
     location ~* ^/alertmanager(.*) {
         proxy_pass http://{{ kind_node_ip }}:30093/alertmanager$1;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
     }
 
+    # ArgoCD
     location /argocd/ {
         proxy_pass http://{{ kind_node_ip }}:30080/argocd/;
         proxy_set_header Host $host;
@@ -37,21 +49,30 @@ server {
         proxy_set_header X-Forwarded-Proto http;
     }
 
+    # Keycloak
     location /keycloak/ {
         proxy_pass http://{{ kind_node_ip }}:30888/;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
     }
 
+    # Vault
     location /vault/ {
         proxy_pass http://{{ kind_node_ip }}:30200/;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
-        proxy_redirect ~^(http://[^/]+)(/.*)?$ $1/vault$2;
     }
 
+    # Vault UI redirect handler
     location /ui/ {
         proxy_pass http://{{ kind_node_ip }}:30200/ui/;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+    }
+
+    # Vault API
+    location /v1/ {
+        proxy_pass http://{{ kind_node_ip }}:30200/v1/;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
     }
