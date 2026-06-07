@@ -8,29 +8,29 @@
   changed_when: false
 
 - name: Install ArgoCD via Helm
-  ansible.builtin.shell: >
-    helm upgrade --install argocd argo/argo-cd
-    --version {{ argocd_helm_version }}
-    --namespace argocd
-    --create-namespace
-    --set server.service.type=NodePort
-    --set server.service.nodePort=30444
-    --set redis.enabled=true
-    --wait
-    --timeout 600s
+  ansible.builtin.shell: |
+    helm upgrade --install argocd argo/argo-cd \
+      --version {{ argocd_helm_version }} \
+      --namespace argocd \
+      --create-namespace \
+      --set server.service.type=NodePort \
+      --set server.service.nodePort=30444 \
+      --set redis.enabled=true \
+      --wait \
+      --timeout 600s
   register: argocd_helm
-  changed_when: "'UPGRADE' in argocd_helm.stdout or 'INSTALL' in argocd_helm.stdout"
+  changed_when: argocd_helm.rc == 0
 
-- name: Wait for ArgoCD server to be ready
+- name: Wait for ArgoCD server
   ansible.builtin.command: >
     kubectl wait --for=condition=available deployment/argocd-server
-    --namespace=argocd --timeout=600s
+    --namespace=argocd --timeout=300s
   changed_when: false
 
 - name: Get ArgoCD admin password
   ansible.builtin.shell: |
-    kubectl -n argocd get secret argocd-initial-admin-secret
-    -o jsonpath="{.data.password}" | base64 -d
+    kubectl -n argocd get secret argocd-initial-admin-secret \
+      -o jsonpath="{.data.password}" | base64 -d
   register: argocd_password
   changed_when: false
 
@@ -40,15 +40,29 @@
 
 - name: Add GitOps repository to ArgoCD via kubectl secret
   ansible.builtin.shell: |
-    kubectl create secret generic argocd-repo-taskapi-gitops       --namespace argocd       --from-literal=type=git       --from-literal=url={{ argocd_repo_url }}       --from-literal=username=Ajay263       --from-literal=password={{ argocd_repo_token }}       --dry-run=client -o yaml |     kubectl label --local -f -       argocd.argoproj.io/secret-type=repository       --dry-run=client -o yaml |     kubectl apply -f -
+    kubectl create secret generic argocd-repo-taskapi-gitops \
+      --namespace argocd \
+      --from-literal=type=git \
+      --from-literal=url={{ argocd_repo_url }} \
+      --from-literal=username=Ajay263 \
+      --from-literal=password={{ argocd_repo_token }} \
+      --dry-run=client -o yaml | \
+    kubectl label --local -f - \
+      argocd.argoproj.io/secret-type=repository \
+      --dry-run=client -o yaml | \
+    kubectl apply -f -
   changed_when: true
   no_log: true
 
-- name: Show paths for debugging
-  ansible.builtin.debug:
-    msg:
-      - "role_path: {{ role_path }}"
-      - "project file exists check path: {{ role_path }}/../../../argocd/projects/taskapi-project.yaml"
+- name: Create required namespaces
+  ansible.builtin.command: "kubectl create namespace {{ item }}"
+  loop:
+    - taskapi-dev
+    - taskapi-staging
+    - taskapi-prod
+  register: ns_create
+  changed_when: ns_create.rc == 0
+  failed_when: ns_create.rc != 0 and "already exists" not in ns_create.stderr
 
 - name: Apply ArgoCD AppProject
   ansible.builtin.command: >
@@ -57,10 +71,10 @@
 
 - name: Patch AppProject to allow ClusterSecretStore
   ansible.builtin.shell: |
-    kubectl patch appproject taskapi -n argocd --type=json -p='"'"'[
+    kubectl patch appproject taskapi -n argocd --type=json -p='[
       {"op":"add","path":"/spec/clusterResourceWhitelist/-",
        "value":{"group":"external-secrets.io","kind":"ClusterSecretStore"}}
-    ]'"'"'
+    ]'
   changed_when: false
   failed_when: false
 
@@ -68,6 +82,13 @@
   ansible.builtin.command: >
     kubectl apply -f {{ role_path }}/../../../argocd/apps/taskapi-dev.yaml
   changed_when: false
+
+- name: Wait for ArgoCD to sync
+  ansible.builtin.command: >
+    kubectl wait --for=jsonpath='{.status.sync.status}'=Synced
+    application/taskapi-dev -n argocd --timeout=120s
+  changed_when: false
+  failed_when: false
 
 - name: Show ArgoCD app status
   ansible.builtin.command: >
@@ -79,4 +100,4 @@
 
 - name: Display ArgoCD status
   ansible.builtin.debug:
-    msg: "ArgoCD taskapi-dev status: {{ argocd_app_status.stdout }}"
+    msg: "ArgoCD taskapi-dev: {{ argocd_app_status.stdout }}"

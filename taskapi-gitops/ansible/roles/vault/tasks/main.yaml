@@ -13,75 +13,230 @@
   changed_when: vault_create_ns.rc == 0
   failed_when: vault_create_ns.rc != 0 and "already exists" not in vault_create_ns.stderr
 
-- name: Install Vault via Helm
-  ansible.builtin.shell: >
-    helm upgrade --install vault hashicorp/vault
-    --namespace vault
-    --set server.dev.enabled=true
-    --set server.dev.devRootToken=root
-    --set injector.enabled=false
-    --set server.resources.requests.memory=128Mi
-    --set server.resources.requests.cpu=100m
-    --set server.resources.limits.memory=256Mi
-    --set server.resources.limits.cpu=200m
-    --wait
-    --timeout 600s
+- name: Install Vault in production mode with file storage
+  ansible.builtin.shell: |
+    helm upgrade --install vault hashicorp/vault \
+      --namespace vault \
+      --set server.dev.enabled=false \
+      --set server.standalone.enabled=true \
+      --set server.standalone.config='
+        ui = true
+        listener "tcp" {
+          tls_disable = 1
+          address = "[::]:8200"
+          cluster_address = "[::]:8201"
+        }
+        storage "file" {
+          path = "/vault/data"
+        }
+      ' \
+      --set server.dataStorage.enabled=true \
+      --set server.dataStorage.size=1Gi \
+      --set injector.enabled=false \
+      --set server.resources.requests.memory=128Mi \
+      --set server.resources.requests.cpu=100m \
+      --set server.resources.limits.memory=256Mi \
+      --set server.resources.limits.cpu=200m \
+      --wait \
+      --timeout 600s
   register: vault_helm_install
-  changed_when: "'UPGRADE' in vault_helm_install.stdout or 'INSTALL' in vault_helm_install.stdout"
+  changed_when: vault_helm_install.rc == 0
 
-- name: Wait for Vault pod to be ready
+- name: Wait for Vault pod to be running
   ansible.builtin.command: >
     kubectl wait --for=condition=ready pod
     -l app.kubernetes.io/name=vault
-    -n vault --timeout=600s
-  register: vault_wait_pod
+    -n vault --timeout=120s
+  register: vault_wait
   changed_when: false
-  until: vault_wait_pod.rc == 0
-  retries: 3
-  delay: 10
+  failed_when: false
 
-- name: Verify Vault is working
-  ansible.builtin.command: kubectl exec -n vault vault-0 -- vault status
-  register: vault_status
+- name: Check if Vault is already initialized
+  ansible.builtin.command: >
+    kubectl exec -n vault vault-0 -- vault status -format=json
+  register: vault_status_raw
   changed_when: false
-  until: vault_status.rc == 0
-  retries: 30
-  delay: 10
+  failed_when: false
 
-- name: Display Vault status
-  ansible.builtin.debug:
-    msg: "{{ vault_status.stdout_lines }}"
+- name: Parse Vault status
+  ansible.builtin.set_fact:
+    vault_initialized: "{{ (vault_status_raw.stdout | from_json).initialized | default(false) }}"
+    vault_sealed: "{{ (vault_status_raw.stdout | from_json).sealed | default(true) }}"
+  when: vault_status_raw.rc == 0 and vault_status_raw.stdout != ""
 
-- name: Configure Vault Kubernetes auth
-  ansible.builtin.shell: |
-    kubectl port-forward -n vault svc/vault 8200:8200 &
-    PF_PID=$!
-    sleep 5
-    export VAULT_ADDR=http://127.0.0.1:8200
-    export VAULT_TOKEN=root
-    vault auth enable kubernetes 2>/dev/null || true
-    vault write auth/kubernetes/config kubernetes_host="https://kubernetes.default.svc.cluster.local:443"
-    vault policy write taskapi-dev - <<EOF
-    path "secret/data/taskapi/dev" { capabilities = ["read"] }
-    path "secret/metadata/taskapi/dev" { capabilities = ["read", "list"] }
-    EOF
-    vault policy write taskapi-staging - <<EOF
-    path "secret/data/taskapi/staging" { capabilities = ["read"] }
-    EOF
-    vault policy write taskapi-prod - <<EOF
-    path "secret/data/taskapi/prod" { capabilities = ["read"] }
-    EOF
-    vault kv put secret/taskapi/dev db-password="dev-$(openssl rand -hex 8)" api-key="dev-api-$(openssl rand -hex 12)"
-    vault kv put secret/taskapi/staging db-password="staging-$(openssl rand -hex 8)" api-key="staging-api-$(openssl rand -hex 12)"
-    vault kv put secret/taskapi/prod db-password="prod-$(openssl rand -hex 8)" api-key="prod-api-$(openssl rand -hex 12)"
-    vault write auth/kubernetes/role/taskapi-dev bound_service_account_names=taskapi bound_service_account_namespaces=taskapi-dev policies=taskapi-dev ttl=24h
-    vault write auth/kubernetes/role/taskapi-staging bound_service_account_names=taskapi bound_service_account_namespaces=taskapi-staging policies=taskapi-staging ttl=1h
-    vault write auth/kubernetes/role/taskapi-prod bound_service_account_names=taskapi bound_service_account_namespaces=taskapi-prod policies=taskapi-prod ttl=1h
-    kill $PF_PID 2>/dev/null || true
+- name: Set defaults if vault status unavailable
+  ansible.builtin.set_fact:
+    vault_initialized: false
+    vault_sealed: true
+  when: vault_status_raw.rc != 0 or vault_status_raw.stdout == ""
+
+- name: Initialize Vault (first time only)
+  ansible.builtin.command: >
+    kubectl exec -n vault vault-0 --
+    vault operator init -key-shares=5 -key-threshold=3 -format=json
+  register: vault_init_output
+  when: not vault_initialized
   changed_when: true
-  environment:
-    HOME: "{{ ansible_env.HOME }}"
+  no_log: true
 
-- name: Show Vault configuration complete
+- name: Parse init output and store unseal keys
+  ansible.builtin.set_fact:
+    vault_unseal_keys: "{{ (vault_init_output.stdout | from_json).unseal_keys_b64 }}"
+    vault_root_token: "{{ (vault_init_output.stdout | from_json).root_token }}"
+  when: not vault_initialized
+  no_log: true
+
+- name: Store unseal keys in GitHub Secrets via API
+  ansible.builtin.uri:
+    url: "https://api.github.com/repos/Ajay263/taskapi-gitops/actions/secrets/VAULT_UNSEAL_KEY_{{ item.0 + 1 }}"
+    method: PUT
+    headers:
+      Authorization: "Bearer {{ github_token }}"
+      Accept: "application/vnd.github+json"
+    body_format: json
+    body:
+      encrypted_value: "{{ item.1 }}"
+      key_id: "{{ github_public_key_id }}"
+    status_code: [201, 204]
+  loop: "{{ vault_unseal_keys | zip_longest([]) | list | enumerate | list }}"
+  when: not vault_initialized
+  no_log: true
+  ignore_errors: true
+
+- name: Save init output to file on VM (backup)
+  ansible.builtin.copy:
+    content: "{{ vault_init_output.stdout }}"
+    dest: /home/azureuser/.vault-init.json
+    mode: '0600'
+    owner: azureuser
+  when: not vault_initialized
+  no_log: true
+
+- name: Show vault init message
   ansible.builtin.debug:
-    msg: "✅ Vault installed and configured with dev/staging/prod secrets"
+    msg: "✅ Vault initialized — unseal keys saved to /home/azureuser/.vault-init.json and attempted GitHub Secrets"
+  when: not vault_initialized
+
+- name: Unseal Vault using keys from file
+  ansible.builtin.shell: |
+    if [ -f /home/azureuser/.vault-init.json ]; then
+      KEYS=$(python3 -c "
+    import json
+    data = json.load(open('/home/azureuser/.vault-init.json'))
+    keys = data['unseal_keys_b64'][:3]
+    print('\n'.join(keys))
+    ")
+      while IFS= read -r key; do
+        kubectl exec -n vault vault-0 -- vault operator unseal "$key" || true
+      done <<< "$KEYS"
+    else
+      echo "No init file found — Vault may already be unsealed"
+    fi
+  changed_when: false
+  when: vault_sealed | default(true)
+
+- name: Wait for Vault to be unsealed
+  ansible.builtin.command: >
+    kubectl exec -n vault vault-0 -- vault status -format=json
+  register: vault_unsealed_check
+  until: >
+    vault_unsealed_check.rc == 0 and
+    not (vault_unsealed_check.stdout | from_json).sealed
+  retries: 10
+  delay: 5
+  changed_when: false
+
+- name: Get root token from init file
+  ansible.builtin.shell: |
+    python3 -c "
+    import json
+    data = json.load(open('/home/azureuser/.vault-init.json'))
+    print(data['root_token'])
+    "
+  register: vault_token_from_file
+  changed_when: false
+  when: vault_initialized or not vault_initialized
+
+- name: Set vault token fact
+  ansible.builtin.set_fact:
+    vault_root_token: "{{ vault_token_from_file.stdout | trim }}"
+
+- name: Configure Vault via kubectl exec
+  ansible.builtin.shell: |
+    VAULT_TOKEN="{{ vault_root_token }}"
+    POD="vault-0"
+    NS="vault"
+
+    kubectl exec -n $NS $POD -- sh -c "
+    export VAULT_TOKEN=$VAULT_TOKEN
+    export VAULT_ADDR=http://127.0.0.1:8200
+
+    # Enable kubernetes auth
+    vault auth enable kubernetes 2>/dev/null || true
+
+    # Configure kubernetes auth
+    vault write auth/kubernetes/config \
+      kubernetes_host='https://kubernetes.default.svc.cluster.local:443'
+
+    # Enable KV v2
+    vault secrets enable -path=secret kv-v2 2>/dev/null || true
+
+    # Write policies
+    vault policy write taskapi-dev - << 'POLICY'
+    path \"secret/data/taskapi/dev\" { capabilities = [\"read\"] }
+    path \"secret/metadata/taskapi/dev\" { capabilities = [\"read\", \"list\"] }
+    POLICY
+
+    vault policy write taskapi-staging - << 'POLICY'
+    path \"secret/data/taskapi/staging\" { capabilities = [\"read\"] }
+    path \"secret/metadata/taskapi/staging\" { capabilities = [\"read\", \"list\"] }
+    POLICY
+
+    vault policy write taskapi-prod - << 'POLICY'
+    path \"secret/data/taskapi/prod\" { capabilities = [\"read\"] }
+    path \"secret/metadata/taskapi/prod\" { capabilities = [\"read\", \"list\"] }
+    POLICY
+
+    # Write secrets
+    vault kv put secret/taskapi/dev \
+      db-password='dev-pass-$(openssl rand -hex 8)' \
+      api-key='dev-api-$(openssl rand -hex 12)'
+
+    vault kv put secret/taskapi/staging \
+      db-password='staging-pass-$(openssl rand -hex 8)' \
+      api-key='staging-api-$(openssl rand -hex 12)'
+
+    vault kv put secret/taskapi/prod \
+      db-password='prod-pass-$(openssl rand -hex 8)' \
+      api-key='prod-api-$(openssl rand -hex 12)'
+
+    # Create K8s auth roles
+    vault write auth/kubernetes/role/taskapi-dev \
+      bound_service_account_names=taskapi \
+      bound_service_account_namespaces=taskapi-dev \
+      policies=taskapi-dev ttl=24h
+
+    vault write auth/kubernetes/role/taskapi-staging \
+      bound_service_account_names=taskapi \
+      bound_service_account_namespaces=taskapi-staging \
+      policies=taskapi-staging ttl=1h
+
+    vault write auth/kubernetes/role/taskapi-prod \
+      bound_service_account_names=taskapi \
+      bound_service_account_namespaces=taskapi-prod \
+      policies=taskapi-prod ttl=1h
+    "
+  changed_when: true
+  no_log: false
+
+- name: Verify Vault is configured
+  ansible.builtin.command: >
+    kubectl exec -n vault vault-0 -- sh -c
+    "VAULT_TOKEN={{ vault_root_token }} VAULT_ADDR=http://127.0.0.1:8200
+    vault read auth/kubernetes/role/taskapi-dev"
+  changed_when: false
+  register: vault_verify
+
+- name: Show Vault status
+  ansible.builtin.debug:
+    msg: "✅ Vault production mode — initialized: {{ vault_initialized | default(true) }}, configured"
