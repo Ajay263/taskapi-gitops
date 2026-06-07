@@ -17,14 +17,14 @@
     --version 0.9.20
     --set installCRDs=true
     --wait
-    --timeout 120s
+    --timeout 300s
   register: eso_install
   changed_when: eso_install.rc == 0
 
 - name: Wait for ESO to be ready
   ansible.builtin.command: >
     kubectl wait --for=condition=available deployment/external-secrets
-    --namespace=external-secrets --timeout=120s
+    --namespace=external-secrets --timeout=300s
   changed_when: false
 
 - name: Verify ESO is running
