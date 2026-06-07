@@ -42,6 +42,6 @@ spec:
             pathType: ImplementationSpecific
             backend:
               service:
-                name: taskapi-ingress
+                name: taskapi
                 port:
-                  name: http
+                  number: 8000
