@@ -19,6 +19,8 @@ resources:
 
 # These labels are added to EVERY resource created from this base.
 # Makes it easy to select all taskapi resources: kubectl get all -l app.kubernetes.io/name=taskapi
-commonLabels:
-  app.kubernetes.io/name: taskapi
-  app.kubernetes.io/managed-by: kustomize
+labels:
+  - pairs:
+      app.kubernetes.io/name: taskapi
+      app.kubernetes.io/managed-by: kustomize
+    includeSelectors: false
