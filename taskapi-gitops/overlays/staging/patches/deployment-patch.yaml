@@ -10,6 +10,13 @@ spec:
         environment: staging
         track: stable
     spec:
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app: taskapi
       securityContext:
         runAsNonRoot: true
         runAsUser: 1000
