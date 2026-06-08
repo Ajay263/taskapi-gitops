@@ -1,23 +1,20 @@
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
-  name: taskapi-dev
+  name: taskapi-staging-canary
   namespace: argocd
   annotations:
-    argocd.argoproj.io/sync-wave: "1"
+    argocd.argoproj.io/sync-wave: "2"
 spec:
   project: taskapi
   source:
     repoURL: https://github.com/Ajay263/taskapi-gitops
     targetRevision: HEAD
-    path: taskapi-gitops/overlays/dev
+    path: taskapi-gitops/overlays/staging-canary
   destination:
     server: https://kubernetes.default.svc
-    namespace: taskapi-dev
+    namespace: taskapi-staging
   syncPolicy:
-    automated:
-      prune: true
-      selfHeal: true
     syncOptions:
       - CreateNamespace=true
       - ApplyOutOfSyncOnly=true
