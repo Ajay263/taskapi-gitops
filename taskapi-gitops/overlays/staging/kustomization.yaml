@@ -23,7 +23,3 @@ images:
   - name: taskapi
     newName: ghcr.io/ajay263/taskapi
     newTag: latest
-labels:
-  - pairs:
-      environment: staging
-    includeSelectors: false
