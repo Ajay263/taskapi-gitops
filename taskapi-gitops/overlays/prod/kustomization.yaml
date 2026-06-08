@@ -4,6 +4,8 @@ kind: Kustomization
 namespace: taskapi-prod
 
 resources:
+  - service-bluegreen.yaml
+  - namespace.yaml
   - ../../base
   - poddisruptionbudget.yaml   # Extra resource only in production
 

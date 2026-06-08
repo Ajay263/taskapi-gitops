@@ -5,6 +5,7 @@ namespace: taskapi-dev
 
 # Inherit all resources from base/
 resources:
+  - namespace.yaml
 - ../../base
 
 # Apply dev-specific patches (only the fields that differ)

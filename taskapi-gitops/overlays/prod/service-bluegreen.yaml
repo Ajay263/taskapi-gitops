@@ -1,0 +1,17 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: taskapi-live
+  namespace: taskapi-prod
+  labels:
+    environment: prod
+    role: live
+spec:
+  selector:
+    app: taskapi
+    slot: blue
+  ports:
+    - name: http
+      port: 80
+      targetPort: 8000
+  type: ClusterIP

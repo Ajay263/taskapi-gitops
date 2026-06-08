@@ -1,0 +1,31 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: taskapi
+  labels:
+    slot: green
+spec:
+  replicas: 3
+  template:
+    metadata:
+      labels:
+        environment: prod
+        slot: green
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+      containers:
+        - name: taskapi
+          env:
+            - name: ENVIRONMENT
+              value: "production-green"
+            - name: LOG_LEVEL
+              value: "WARNING"
+          resources:
+            requests:
+              memory: "128Mi"
+              cpu: "100m"
+            limits:
+              memory: "256Mi"
+              cpu: "500m"

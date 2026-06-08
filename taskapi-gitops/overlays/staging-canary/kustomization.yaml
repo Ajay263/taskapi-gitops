@@ -1,26 +1,21 @@
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
-
 namespace: taskapi-staging
-
+nameSuffix: "-canary"
+commonLabels:
+  environment: staging
+  track: canary
 resources:
-  - namespace.yaml
   - ../../base
-
 patches:
-  - path: patches/deployment-patch.yaml
+  - path: patches/canary-patch.yaml
     target:
       kind: Deployment
       name: taskapi
-  - path: patches/external-secret-patch.yaml
-    target:
-      kind: ExternalSecret
-      name: taskapi-secrets
-
 images:
+  - name: ghcr.io/ajay263/taskapi
+    newName: ghcr.io/ajay263/taskapi
+    newTag: latest
   - name: taskapi
     newName: ghcr.io/ajay263/taskapi
     newTag: latest
-
-commonLabels:
-  environment: staging
