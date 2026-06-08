@@ -61,12 +61,10 @@
           path: "secret"
           version: "v2"
           auth:
-            kubernetes:
-              mountPath: "kubernetes"
-              role: "external-secrets"
-              serviceAccountRef:
-                name: "external-secrets"
-                namespace: "external-secrets"
+            tokenSecretRef:
+              name: vault-token
+              namespace: external-secrets
+              key: token
     EOF
   args:
     executable: /bin/bash

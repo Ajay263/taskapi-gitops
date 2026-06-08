@@ -7,6 +7,7 @@ export VAULT_TOKEN=$VAULT_TOKEN
 vault auth enable kubernetes 2>/dev/null || true
 vault write auth/kubernetes/config \
   kubernetes_host=https://kubernetes.default.svc.cluster.local:443
+
 vault secrets enable -path=secret kv-v2 2>/dev/null || true
 
 vault policy write taskapi-dev /tmp/policy-dev.hcl
@@ -32,11 +33,9 @@ vault write auth/kubernetes/role/taskapi-prod \
   bound_service_account_namespaces=taskapi-prod \
   policies=taskapi-prod ttl=1h
 
-# Role for External Secrets Operator
 vault write auth/kubernetes/role/external-secrets \
   bound_service_account_names=external-secrets \
   bound_service_account_namespaces=external-secrets \
-  policies=taskapi-dev,taskapi-staging,taskapi-prod \
-  ttl=24h
+  policies=taskapi-dev,taskapi-staging,taskapi-prod ttl=24h
 
 echo "Vault configured successfully"
