@@ -1,28 +1,21 @@
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
-
 namespace: taskapi-dev
-
-# Inherit all resources from base/
 resources:
-  - namespace.yaml
-- ../../base
-
-# Apply dev-specific patches (only the fields that differ)
+  - ../../base
 patches:
-- path: patches/deployment-patch.yaml
-  target:
-    kind: Deployment
-    name: taskapi
-
-# Image override — CI pipeline updates this tag after each successful build
+  - path: patches/deployment-patch.yaml
+    target:
+      kind: Deployment
+      name: taskapi
 images:
-- name: ghcr.io/ajay263/taskapi
-  newName: ghcr.io/ajay263/taskapi
-  newTag: sha-3ab00e2
-- name: taskapi
-  newName: ghcr.io/ajay263/taskapi
-  newTag: sha-2bba0a2
-
-commonLabels:
-  environment: dev
+  - name: ghcr.io/ajay263/taskapi
+    newName: ghcr.io/ajay263/taskapi
+    newTag: latest
+  - name: taskapi
+    newName: ghcr.io/ajay263/taskapi
+    newTag: latest
+labels:
+  - pairs:
+      environment: dev
+    includeSelectors: false
