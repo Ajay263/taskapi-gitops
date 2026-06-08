@@ -1,0 +1,45 @@
+apiVersion: networking.istio.io/v1alpha3
+kind: VirtualService
+metadata:
+  name: keycloak
+  namespace: iam
+spec:
+  hosts:
+    - "*"
+  gateways:
+    - istio-system/platform-gateway
+  http:
+    - match:
+        - uri:
+            prefix: /keycloak
+      rewrite:
+        uri: /
+      route:
+        - destination:
+            host: keycloak.iam.svc.cluster.local
+            port:
+              number: 8080
+    - match:
+        - uri:
+            prefix: /realms
+      route:
+        - destination:
+            host: keycloak.iam.svc.cluster.local
+            port:
+              number: 8080
+    - match:
+        - uri:
+            prefix: /admin
+      route:
+        - destination:
+            host: keycloak.iam.svc.cluster.local
+            port:
+              number: 8080
+    - match:
+        - uri:
+            prefix: /resources
+      route:
+        - destination:
+            host: keycloak.iam.svc.cluster.local
+            port:
+              number: 8080

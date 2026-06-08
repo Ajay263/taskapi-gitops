@@ -1,0 +1,21 @@
+apiVersion: networking.istio.io/v1alpha3
+kind: VirtualService
+metadata:
+  name: taskapi
+  namespace: taskapi-dev
+spec:
+  hosts:
+    - "*"
+  gateways:
+    - istio-system/platform-gateway
+  http:
+    - match:
+        - uri:
+            prefix: /api/
+      rewrite:
+        uri: /
+      route:
+        - destination:
+            host: taskapi.taskapi-dev.svc.cluster.local
+            port:
+              number: 80
