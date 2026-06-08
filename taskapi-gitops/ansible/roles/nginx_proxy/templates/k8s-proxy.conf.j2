@@ -5,90 +5,72 @@ server {
     proxy_read_timeout 60s;
 
     location /api/ {
-        proxy_pass http://{{ kind_node_ip }}:32569/api/;
+        proxy_pass http://{{ nginx_ingress_ip }}/api/;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
     }
 
     location = /openapi.json {
-        proxy_pass http://{{ kind_node_ip }}:32569/api/openapi.json;
+        proxy_pass http://{{ nginx_ingress_ip }}/api/openapi.json;
         proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
     }
 
     location /grafana/ {
-        proxy_pass http://{{ kind_node_ip }}:30030/grafana/;
+        proxy_pass http://{{ nginx_ingress_ip }}/grafana/;
         proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-Proto http;
     }
 
     location ~* ^/prometheus(.*) {
-        proxy_pass http://{{ kind_node_ip }}:30090/prometheus$1;
+        proxy_pass http://{{ nginx_ingress_ip }}/prometheus$1;
         proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
     }
 
     location ~* ^/alertmanager(.*) {
-        proxy_pass http://{{ kind_node_ip }}:30093/alertmanager$1;
+        proxy_pass http://{{ nginx_ingress_ip }}/alertmanager$1;
         proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
     }
 
     location /argocd/ {
-        proxy_pass http://{{ kind_node_ip }}:30080/argocd/;
+        proxy_pass http://{{ nginx_ingress_ip }}/argocd/;
         proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-Proto http;
     }
 
     location /keycloak/ {
-        proxy_pass http://{{ kind_node_ip }}:30888/;
+        proxy_pass http://{{ nginx_ingress_ip }}/keycloak/;
         proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-Proto http;
-        proxy_buffer_size 128k;
-        proxy_buffers 4 256k;
-        proxy_busy_buffers_size 256k;
     }
 
     location /admin/ {
-        proxy_pass http://{{ kind_node_ip }}:30888/admin/;
+        proxy_pass http://{{ nginx_ingress_ip }}/admin/;
         proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-Proto http;
-        proxy_buffer_size 128k;
-        proxy_buffers 4 256k;
     }
 
     location /realms/ {
-        proxy_pass http://{{ kind_node_ip }}:30888/realms/;
+        proxy_pass http://{{ nginx_ingress_ip }}/realms/;
         proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
     }
 
     location /resources/ {
-        proxy_pass http://{{ kind_node_ip }}:30888/resources/;
+        proxy_pass http://{{ nginx_ingress_ip }}/resources/;
         proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
     }
 
     location /vault/ {
-        proxy_pass http://{{ kind_node_ip }}:30200/;
+        proxy_pass http://{{ nginx_ingress_ip }}/vault/;
         proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
     }
 
     location /ui/ {
-        proxy_pass http://{{ kind_node_ip }}:30200/ui/;
+        proxy_pass http://{{ nginx_ingress_ip }}/ui/;
         proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
     }
 
     location /v1/ {
-        proxy_pass http://{{ kind_node_ip }}:30200/v1/;
+        proxy_pass http://{{ nginx_ingress_ip }}/v1/;
         proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
     }
 }

@@ -6,63 +6,138 @@
     update_cache: true
   become: true
 
-- name: Get NGINX ingress NodePort
+- name: Install MetalLB
   ansible.builtin.shell: |
-    kubectl get svc ingress-nginx-controller -n ingress-nginx \
-      -o jsonpath='{.spec.ports[?(@.port==80)].nodePort}'
-  register: nginx_nodeport
+    kubectl apply -f https://raw.githubusercontent.com/metallb/metallb/v0.13.12/config/manifests/metallb-native.yaml
   changed_when: false
 
-- name: Get KinD worker node IP
+- name: Wait for MetalLB controller
+  ansible.builtin.command: >
+    kubectl wait --for=condition=ready pod
+    -l app=metallb,component=controller
+    -n metallb-system --timeout=90s
+  changed_when: false
+  failed_when: false
+
+- name: Get KinD network subnet
   ansible.builtin.shell: |
-    docker inspect taskapi-local-worker \
-      --format='{{ "{{" }}.NetworkSettings.Networks.kind.IPAddress{{ "}}" }}'
-  register: kind_node_ip_raw
+    docker network inspect kind | python3 -c "
+    import json,sys
+    d=json.load(sys.stdin)
+    for n in d:
+        for c in n.get('IPAM',{}).get('Config',[]):
+            s = c.get('Subnet','')
+            if '172.' in s:
+                print(s)
+    "
+  register: kind_subnet
   changed_when: false
 
-- name: Set KinD node IP fact
-  ansible.builtin.set_fact:
-    kind_node_ip: "{{ kind_node_ip_raw.stdout | trim }}"
+- name: Configure MetalLB IP pool
+  ansible.builtin.shell: |
+    kubectl apply -f - << 'YAML'
+    apiVersion: metallb.io/v1beta1
+    kind: IPAddressPool
+    metadata:
+      name: kind-pool
+      namespace: metallb-system
+    spec:
+      addresses:
+        - 172.18.255.200-172.18.255.250
+    ---
+    apiVersion: metallb.io/v1beta1
+    kind: L2Advertisement
+    metadata:
+      name: kind-l2
+      namespace: metallb-system
+    spec:
+      ipAddressPools:
+        - kind-pool
+    YAML
+  changed_when: false
 
-- name: Show KinD node IP
+- name: Patch NGINX ingress to use LoadBalancer
+  ansible.builtin.shell: |
+    kubectl patch svc ingress-nginx-controller \
+      -n ingress-nginx \
+      --type=merge \
+      -p '{"spec":{"type":"LoadBalancer"}}'
+  changed_when: false
+  failed_when: false
+
+- name: Wait for NGINX ingress LoadBalancer IP
+  ansible.builtin.shell: |
+    kubectl get svc ingress-nginx-controller \
+      -n ingress-nginx \
+      -o jsonpath='{.status.loadBalancer.ingress[0].ip}'
+  register: ingress_lb_ip
+  until: ingress_lb_ip.stdout != ""
+  retries: 20
+  delay: 5
+  changed_when: false
+
+- name: Show ingress LoadBalancer IP
   ansible.builtin.debug:
-    msg: "KinD node IP: {{ kind_node_ip }}"
+    msg: "NGINX Ingress LoadBalancer IP: {{ ingress_lb_ip.stdout }}"
 
-- name: Patch Prometheus to NodePort
+- name: Patch Grafana to ClusterIP
+  ansible.builtin.shell: |
+    kubectl patch svc kube-prometheus-stack-grafana \
+      -n monitoring --type=merge \
+      -p '{"spec":{"type":"ClusterIP","nodePort":null}}'
+  changed_when: false
+  failed_when: false
+
+- name: Patch Prometheus to ClusterIP
   ansible.builtin.shell: |
     kubectl patch svc kube-prometheus-stack-prometheus \
-      -n monitoring \
-      --type='json' \
-      -p='[{"op":"replace","path":"/spec/type","value":"NodePort"},
-           {"op":"add","path":"/spec/ports/0/nodePort","value":30090}]'
+      -n monitoring --type=json \
+      -p='[{"op":"replace","path":"/spec/type","value":"ClusterIP"},{"op":"remove","path":"/spec/ports/0/nodePort"}]'
   changed_when: false
   failed_when: false
 
-- name: Patch Alertmanager to NodePort
+- name: Patch Alertmanager to ClusterIP
   ansible.builtin.shell: |
     kubectl patch svc kube-prometheus-stack-alertmanager \
-      -n monitoring \
-      --type='json' \
-      -p='[{"op":"replace","path":"/spec/type","value":"NodePort"},
-           {"op":"add","path":"/spec/ports/0/nodePort","value":30093}]'
+      -n monitoring --type=json \
+      -p='[{"op":"replace","path":"/spec/type","value":"ClusterIP"},{"op":"remove","path":"/spec/ports/0/nodePort"}]'
   changed_when: false
   failed_when: false
 
-- name: Patch Vault to NodePort
+- name: Patch Vault to ClusterIP
   ansible.builtin.shell: |
-    kubectl patch svc vault \
-      -n vault \
-      --type='json' \
-      -p='[{"op":"replace","path":"/spec/type","value":"NodePort"},
-           {"op":"add","path":"/spec/ports/0/nodePort","value":30200}]'
+    kubectl patch svc vault -n vault --type=merge \
+      -p '{"spec":{"type":"ClusterIP"}}'
   changed_when: false
   failed_when: false
 
-- name: Configure nginx reverse proxy
+- name: Patch Keycloak to ClusterIP
+  ansible.builtin.shell: |
+    kubectl patch svc keycloak -n iam --type=merge \
+      -p '{"spec":{"type":"ClusterIP"}}'
+  changed_when: false
+  failed_when: false
+
+- name: Patch ArgoCD to ClusterIP
+  ansible.builtin.shell: |
+    kubectl patch svc argocd-server -n argocd --type=merge \
+      -p '{"spec":{"type":"ClusterIP"}}'
+  changed_when: false
+  failed_when: false
+
+- name: Apply all service ingress manifests
+  ansible.builtin.command: >
+    kubectl apply -f {{ role_path }}/../../../infrastructure/ingress/ingress-all-services.yaml
+  changed_when: false
+  failed_when: false
+
+- name: Configure nginx reverse proxy to LoadBalancer IP
   ansible.builtin.template:
     src: k8s-proxy.conf.j2
     dest: /etc/nginx/sites-available/k8s-proxy
     mode: '0644'
+  vars:
+    nginx_ingress_ip: "{{ ingress_lb_ip.stdout }}"
   become: true
   notify: restart nginx
 
@@ -93,30 +168,13 @@
     enabled: true
   become: true
 
-- name: Delete existing taskapi ingress if exists
-  ansible.builtin.command: kubectl delete ingress taskapi -n taskapi-dev
-  failed_when: false
-  changed_when: false
-
-- name: Apply all service ingress manifests
-  ansible.builtin.command: >
-    kubectl apply -f {{ role_path }}/../../../infrastructure/ingress/ingress-all-services.yaml
-  changed_when: false
-
-- name: Verify all services accessible
-  ansible.builtin.shell: |
-    VM_IP=$(curl -s ifconfig.me)
-    echo "=== Service URLs ==="
-    echo "TaskAPI:      http://$VM_IP/api/health"
-    echo "Grafana:      http://$VM_IP/grafana/"
-    echo "Prometheus:   http://$VM_IP/prometheus/"
-    echo "Alertmanager: http://$VM_IP/alertmanager/"
-    echo "ArgoCD:       http://$VM_IP/argocd/"
-    echo "Keycloak:     http://$VM_IP/keycloak/"
-    echo "Vault:        http://$VM_IP/vault/"
-  register: service_urls
-  changed_when: false
-
 - name: Show service URLs
   ansible.builtin.debug:
-    msg: "{{ service_urls.stdout_lines }}"
+    msg:
+      - "TaskAPI:      http://{{ ansible_host }}/api/health"
+      - "Grafana:      http://{{ ansible_host }}/grafana/"
+      - "Prometheus:   http://{{ ansible_host }}/prometheus/"
+      - "Alertmanager: http://{{ ansible_host }}/alertmanager/"
+      - "ArgoCD:       http://{{ ansible_host }}/argocd/"
+      - "Keycloak:     http://{{ ansible_host }}/keycloak/"
+      - "Vault:        http://{{ ansible_host }}/vault/ui/"
