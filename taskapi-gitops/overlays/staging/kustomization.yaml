@@ -4,6 +4,10 @@ namespace: taskapi-staging
 resources:
   - ../../base
 patches:
+  - path: patches/ingress-patch.yaml
+    target:
+      kind: Ingress
+      name: taskapi-ingress
   - path: patches/deployment-patch.yaml
     target:
       kind: Deployment
